@@ -1,0 +1,50 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Database (global — excludes all .db files everywhere)
+*.db
+*.sqlite
+*.sqlite3
+
+# Data directory (database backups — tracked via .gitkeep, .db excluded above)
+# The data/ directory is preserved in git for structure; .db files are excluded
+# Use DETECTIONS_DB_PATH env var to point to data/detections.db on new machines
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+
+# Test coverage
+coverage/
+
+# Detection rule repositories — external git repos, re-clone on new machine
+# These are large external repos that should not be embedded in this project
+rules/sigma/
+rules/splunk/
+rules/elastic/
+rules/sentinel/
+# Legacy path names (if present)
+sigma-rules/
+splunk-content/
+elastic-rules/
+
+# Keep custom rules directory tracked (our own rules)
+!rules/custom/

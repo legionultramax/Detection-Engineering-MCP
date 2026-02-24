@@ -1,0 +1,25 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__security-detections__get_detection",
+      "mcp__security-detections__get_stats",
+      "mcp__security-detections__lookup_mitre_technique",
+      "mcp__security-detections__search_mitre_techniques",
+      "mcp__security-detections__lookup_lolbas",
+      "mcp__security-detections__analyze_coverage",
+      "mcp__security-detections__get_knowledge_summary",
+      "mcp__security-detections__list_by_mitre",
+      "mcp__house-of-hunting__search_mitre_techniques",
+      "mcp__house-of-hunting__search_detections",
+      "mcp__house-of-hunting__get_threat_profile",
+      "mcp__house-of-hunting__log_decision",
+      "mcp__house-of-hunting__lookup_mitre_technique",
+      "mcp__house-of-hunting__check_cisa_kev",
+      "Bash(npm run build:*)",
+      "mcp__house-of-hunting__get_threat_group",
+      "mcp__house-of-hunting__get_mitre_attack_stats",
+      "mcp__house-of-hunting__list_data_sources",
+      "Bash(node -e \":*)"
+    ]
+  }
+}

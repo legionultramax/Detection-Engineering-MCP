@@ -1,0 +1,360 @@
+{
+  "version": "1.0",
+  "metadata": {
+    "owner": "Detection Engineering",
+    "last_modified": "2026-02-23T00:00:00Z",
+    "description": "Curated threat intelligence sources for custom Playwright ingestion pipeline. Sources selected for maximum actor coverage, alias mapping, and TTP extraction value."
+  },
+  "defaults": {
+    "scrape_method": "playwright",
+    "max_age_hours": 168,
+    "extraction_mode": "full"
+  },
+  "sources": [
+    {
+      "id": "src_001",
+      "name": "MITRE ATT&CK Groups",
+      "url": "https://attack.mitre.org/groups/",
+      "category": "government",
+      "priority": 1,
+      "tags": ["mitre", "att&ck", "groups", "baseline", "techniques", "all-actors"],
+      "scrape_config": {
+        "method": "playwright",
+        "wait_seconds": 3,
+        "content_selector": null,
+        "pagination": false,
+        "max_pages": 1
+      },
+      "relevance": {
+        "industries": ["all"],
+        "regions": ["all"],
+        "scenarios": ["all"]
+      },
+      "refresh_interval_hours": 720,
+      "enabled": true,
+      "notes": "Core baseline. Official MITRE ATT&CK group definitions with technique mappings. Updates monthly. Also available via house-of-hunting MITRE tools (get_threat_group, search_threat_groups). Scrape for alias cross-reference and new group additions."
+    },
+    {
+      "id": "src_002",
+      "name": "Mandiant / Google Threat Intelligence Blog",
+      "url": "https://cloud.google.com/blog/topics/threat-intelligence",
+      "category": "vendor_research",
+      "priority": 1,
+      "tags": ["mandiant", "google", "apt", "nation-state", "deep-profiles", "animals"],
+      "scrape_config": {
+        "method": "playwright",
+        "wait_seconds": 5,
+        "content_selector": null,
+        "pagination": false,
+        "max_pages": 1
+      },
+      "relevance": {
+        "industries": ["all"],
+        "regions": ["all"],
+        "scenarios": ["apt", "espionage", "ransomware"]
+      },
+      "refresh_interval_hours": 168,
+      "enabled": true,
+      "notes": "Tier 1 vendor. Best animal naming (APT1-43). Deep APT profiles with full technique chains. MCP tool exists (mandiant_search_reports) but RSS-limited — Playwright is primary. Also see APT groups page: https://cloud.google.com/security/resources/insights/apt-groups"
+    },
+    {
+      "id": "src_003",
+      "name": "CrowdStrike Adversary Universe",
+      "url": "https://www.crowdstrike.com/en-us/adversaries/",
+      "category": "vendor_research",
+      "priority": 1,
+      "tags": ["crowdstrike", "bear", "spider", "panda", "kitten", "chollima", "nation-state", "ecrime"],
+      "scrape_config": {
+        "method": "playwright",
+        "wait_seconds": 5,
+        "content_selector": null,
+        "pagination": false,
+        "max_pages": 1
+      },
+      "relevance": {
+        "industries": ["all"],
+        "regions": ["all"],
+        "scenarios": ["apt", "ransomware", "ecrime"]
+      },
+      "refresh_interval_hours": 168,
+      "enabled": true,
+      "notes": "Tier 1 vendor. 257+ adversary profiles. Fastest naming updates (weekly). Bear=Russia, Spider=eCrime, Panda=China, Kitten=Iran, Chollima=DPRK, Jackal=Hacktivist. MCP tool exists (crowdstrike_search_reports) but RSS-limited — Playwright is primary."
+    },
+    {
+      "id": "src_004",
+      "name": "Microsoft Threat Actor Naming & Intelligence",
+      "url": "https://www.microsoft.com/en-us/security/blog/threat-intelligence/threat-actors/",
+      "category": "vendor_research",
+      "priority": 1,
+      "tags": ["microsoft", "storm", "typhoon", "sandstorm", "blizzard", "sleet", "cloud", "nation-state"],
+      "scrape_config": {
+        "method": "playwright",
+        "wait_seconds": 5,
+        "content_selector": null,
+        "pagination": false,
+        "max_pages": 1
+      },
+      "relevance": {
+        "industries": ["all"],
+        "regions": ["all"],
+        "scenarios": ["apt", "ransomware", "cloud"]
+      },
+      "refresh_interval_hours": 168,
+      "enabled": true,
+      "notes": "Tier 1 vendor. Weather-based taxonomy (Typhoon=China, Sandstorm=Iran, Blizzard=Russia, Sleet=DPRK, Tempest=eCrime, Storm=Emerging). Best for Microsoft ecosystem + cloud threats. MCP tool exists (microsoft_search_reports) but RSS-limited. Also see taxonomy reference: https://learn.microsoft.com/en-us/unified-secops/microsoft-threat-actor-naming"
+    },
+    {
+      "id": "src_005",
+      "name": "Symantec / Broadcom Threat Intelligence Blog",
+      "url": "https://symantec-enterprise-blogs.security.com/blogs/threat-intelligence",
+      "category": "vendor_research",
+      "priority": 2,
+      "tags": ["symantec", "broadcom", "w32", "apt", "legacy", "campaigns"],
+      "scrape_config": {
+        "method": "playwright",
+        "wait_seconds": 5,
+        "content_selector": null,
+        "pagination": false,
+        "max_pages": 1
+      },
+      "relevance": {
+        "industries": ["all"],
+        "regions": ["all"],
+        "scenarios": ["apt", "ransomware"]
+      },
+      "refresh_interval_hours": 336,
+      "enabled": true,
+      "notes": "Tier 2 vendor. Strong legacy actor naming (W32.* malware families). Good coverage of older + continuing campaigns. No MCP tool — Playwright only."
+    },
+    {
+      "id": "src_006",
+      "name": "Kaspersky Securelist APT Reports",
+      "url": "https://securelist.com/category/apt-reports/",
+      "category": "vendor_research",
+      "priority": 1,
+      "tags": ["kaspersky", "great", "sofacy", "turla", "apt", "russian-actors", "eastern-europe"],
+      "scrape_config": {
+        "method": "playwright",
+        "wait_seconds": 3,
+        "content_selector": null,
+        "pagination": false,
+        "max_pages": 1
+      },
+      "relevance": {
+        "industries": ["government", "defense", "telecom"],
+        "regions": ["eastern-europe", "russia", "middle-east", "all"],
+        "scenarios": ["apt", "espionage"]
+      },
+      "refresh_interval_hours": 168,
+      "enabled": true,
+      "notes": "Tier 1 vendor. GReAT team tracks 900+ APT groups. Strongest on Russian and Eastern European actors (Sofacy, Turla, Lazarus). MCP tool exists (kaspersky_search_reports) but RSS-limited — Playwright is primary."
+    },
+    {
+      "id": "src_007",
+      "name": "Recorded Future Insikt Group Research",
+      "url": "https://www.recordedfuture.com/research/insikt-group",
+      "category": "vendor_research",
+      "priority": 2,
+      "tags": ["recorded-future", "insikt", "aliases", "timelines", "nation-state", "ransomware"],
+      "scrape_config": {
+        "method": "playwright",
+        "wait_seconds": 5,
+        "content_selector": null,
+        "pagination": false,
+        "max_pages": 1
+      },
+      "relevance": {
+        "industries": ["all"],
+        "regions": ["all"],
+        "scenarios": ["apt", "ransomware", "espionage"]
+      },
+      "refresh_interval_hours": 168,
+      "enabled": true,
+      "notes": "Gold standard for alias mapping and actor timelines. Insikt Group produces high-quality actor profiles. Some content may be paywalled — Playwright will extract what is publicly available. No MCP tool — Playwright only."
+    },
+    {
+      "id": "src_008",
+      "name": "Group-IB Threat Research Blog",
+      "url": "https://www.group-ib.com/blog/",
+      "category": "vendor_research",
+      "priority": 2,
+      "tags": ["group-ib", "apt", "financial-crime", "cybercrime", "eastern-europe", "supply-chain"],
+      "scrape_config": {
+        "method": "playwright",
+        "wait_seconds": 5,
+        "content_selector": null,
+        "pagination": false,
+        "max_pages": 1
+      },
+      "relevance": {
+        "industries": ["finance", "retail", "government"],
+        "regions": ["eastern-europe", "russia", "middle-east"],
+        "scenarios": ["apt", "ransomware", "supply-chain"]
+      },
+      "refresh_interval_hours": 168,
+      "enabled": true,
+      "notes": "No MCP tool. Known to block server-side fetchers (ti_report_ingest returned 403). MUST use Playwright. Strong on Eastern European cybercrime and financial actors. Published MuddyWater and supply-chain research relevant to UAE engagement."
+    },
+    {
+      "id": "src_009",
+      "name": "Secureworks CTU Threat Profiles",
+      "url": "https://www.secureworks.com/research/threat-profiles",
+      "category": "vendor_research",
+      "priority": 2,
+      "tags": ["secureworks", "ctu", "iron", "bronze", "cobalt", "nickel", "malware-families"],
+      "scrape_config": {
+        "method": "playwright",
+        "wait_seconds": 3,
+        "content_selector": null,
+        "pagination": false,
+        "max_pages": 1
+      },
+      "relevance": {
+        "industries": ["all"],
+        "regions": ["all"],
+        "scenarios": ["apt", "ransomware"]
+      },
+      "refresh_interval_hours": 720,
+      "enabled": true,
+      "notes": "Counter Threat Unit (CTU) profiles. Naming: IRON=Russia, BRONZE=China, COBALT=Iran, NICKEL=DPRK, GOLD=eCrime. Quarterly updates. Strong on malware family attribution. No MCP tool — Playwright only."
+    },
+    {
+      "id": "src_010",
+      "name": "Unit 42 / Palo Alto Networks Threat Research",
+      "url": "https://unit42.paloaltonetworks.com/",
+      "category": "vendor_research",
+      "priority": 1,
+      "tags": ["unit42", "palo-alto", "apt", "ransomware", "nation-state", "technical-depth"],
+      "scrape_config": {
+        "method": "playwright",
+        "wait_seconds": 5,
+        "content_selector": null,
+        "pagination": false,
+        "max_pages": 1
+      },
+      "relevance": {
+        "industries": ["all"],
+        "regions": ["all"],
+        "scenarios": ["apt", "ransomware", "espionage"]
+      },
+      "refresh_interval_hours": 168,
+      "enabled": true,
+      "notes": "Tier 1 vendor. Excellent technical depth on actor reports. Weekly updates. 750+ major incident analyses in 2026 IR report. MCP tool exists (unit42_search_reports) but RSS-limited — Playwright is primary."
+    },
+    {
+      "id": "src_011",
+      "name": "Cisco Talos Intelligence Blog",
+      "url": "https://blog.talosintelligence.com/",
+      "category": "vendor_research",
+      "priority": 2,
+      "tags": ["talos", "cisco", "network", "malware", "apt", "global"],
+      "scrape_config": {
+        "method": "playwright",
+        "wait_seconds": 3,
+        "content_selector": null,
+        "pagination": false,
+        "max_pages": 1
+      },
+      "relevance": {
+        "industries": ["telecom", "technology", "finance"],
+        "regions": ["all"],
+        "scenarios": ["apt", "ransomware"]
+      },
+      "refresh_interval_hours": 168,
+      "enabled": true,
+      "notes": "Good for network-centric threat actors and infrastructure-level analysis. Weekly updates. Tracks UAT-* actors. No dedicated MCP tool — Playwright only."
+    },
+    {
+      "id": "src_012",
+      "name": "Dragos OT/ICS Threat Intelligence Blog",
+      "url": "https://www.dragos.com/blog/",
+      "category": "vendor_research",
+      "priority": 2,
+      "tags": ["dragos", "ics", "ot", "scada", "critical-infrastructure", "energy", "industrial"],
+      "scrape_config": {
+        "method": "playwright",
+        "wait_seconds": 5,
+        "content_selector": null,
+        "pagination": false,
+        "max_pages": 1
+      },
+      "relevance": {
+        "industries": ["energy", "manufacturing", "utilities", "critical-infrastructure"],
+        "regions": ["all"],
+        "scenarios": ["apt", "ics-ot"]
+      },
+      "refresh_interval_hours": 336,
+      "enabled": true,
+      "notes": "ICS/OT specialist. Tracks 23+ OT threat groups (KAMACITE, ELECTRUM, VOLTZITE, SYLVANITE, PYROXENE, AZURITE). Essential for industrial/energy sector hunts. MCP tool exists (dragos_search_reports) but RSS-limited — Playwright is primary. 2026 report: 119 ransomware groups hit 3,300 industrial orgs."
+    },
+    {
+      "id": "src_013",
+      "name": "SentinelOne SentinelLabs Research",
+      "url": "https://www.sentinelone.com/labs/",
+      "category": "vendor_research",
+      "priority": 2,
+      "tags": ["sentinelone", "sentinellabs", "apt", "ransomware", "china", "modern"],
+      "scrape_config": {
+        "method": "playwright",
+        "wait_seconds": 5,
+        "content_selector": null,
+        "pagination": false,
+        "max_pages": 1
+      },
+      "relevance": {
+        "industries": ["technology", "government", "defense"],
+        "regions": ["all"],
+        "scenarios": ["apt", "ransomware", "espionage"]
+      },
+      "refresh_interval_hours": 168,
+      "enabled": true,
+      "notes": "Modern ransomware and APT focus. Strong on China-nexus actors (PurpleHaze, ShadowPad research). Weekly updates. No dedicated MCP tool — Playwright only. CAUTION: SentinelOne may have JS-heavy pages, increase wait_seconds if needed."
+    },
+    {
+      "id": "src_014",
+      "name": "The DFIR Report",
+      "url": "https://thedfirreport.com/",
+      "category": "community",
+      "priority": 1,
+      "tags": ["dfir", "case-study", "real-incident", "ttps", "iocs", "sigma", "yara"],
+      "scrape_config": {
+        "method": "playwright",
+        "wait_seconds": 3,
+        "content_selector": null,
+        "pagination": false,
+        "max_pages": 1
+      },
+      "relevance": {
+        "industries": ["all"],
+        "regions": ["all"],
+        "scenarios": ["all"]
+      },
+      "refresh_interval_hours": 168,
+      "enabled": true,
+      "notes": "GOLD STANDARD for real-world TTPs. Detailed case studies of actual intrusions with full MITRE ATT&CK mapping, evidence, and detection guidance. Also publishes Sigma rules and YARA rules on GitHub (github.com/The-DFIR-Report). MCP tool exists (dfir_report_search_reports) but RSS-limited — Playwright is primary."
+    },
+    {
+      "id": "src_015",
+      "name": "APT Groups and Operations Wiki (Google Sheets)",
+      "url": "https://docs.google.com/spreadsheets/d/1H9_xaxQHpWaa4O_Son4Gx0YOIzlcBWMsdvePFX68EKU/edit",
+      "category": "community",
+      "priority": 1,
+      "tags": ["apt-wiki", "aliases", "cross-reference", "community", "all-actors", "naming-map"],
+      "scrape_config": {
+        "method": "playwright",
+        "wait_seconds": 5,
+        "content_selector": null,
+        "pagination": false,
+        "max_pages": 1
+      },
+      "relevance": {
+        "industries": ["all"],
+        "regions": ["all"],
+        "scenarios": ["all"]
+      },
+      "refresh_interval_hours": 168,
+      "enabled": true,
+      "notes": "MUST-HAVE for alias cross-reference. Community-maintained Google Sheet mapping ALL known actor aliases across ALL vendors. Updated weekly. Best single source for resolving CrowdStrike<->Microsoft<->MITRE<->Kaspersky naming overlaps. No MCP tool — Playwright only. NOTE: Google Sheets may require specific Playwright handling."
+    }
+  ]
+}
