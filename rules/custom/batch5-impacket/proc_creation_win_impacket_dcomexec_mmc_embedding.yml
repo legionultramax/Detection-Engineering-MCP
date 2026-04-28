@@ -1,0 +1,39 @@
+title: MMC Spawned With Embedding Flag Indicating DCOM Lateral Movement
+id: c3d4e5f6-1021-4b7c-9d0e-dcomembed02cc
+status: experimental
+description: >
+  Detects mmc.exe being spawned with the -Embedding flag by svchost.exe (DCOM Server Process
+  Launcher), which is the first-stage indicator of Impacket dcomexec.py or any DCOM-based lateral
+  movement using the MMC20 DCOM object. While mmc.exe -Embedding alone can occur legitimately
+  during COM activation, the combination with a network Type 3 logon context is highly suspicious.
+  Maps to T1021.003 Distributed Component Object Model.
+references:
+  - https://attack.mitre.org/techniques/T1021/003/
+  - https://github.com/fortra/impacket/blob/master/impacket/examples/dcomexec.py
+  - https://enigma0x3.net/2017/01/05/lateral-movement-using-the-mmc20-application-com-object/
+author: Detection Engineering (Harris HawkEye)
+date: 2026-04-15
+modified: 2026-04-15
+tags:
+  - attack.lateral-movement
+  - attack.t1021.003
+  - tool.impacket
+  - tool.impacket.dcomexec
+logsource:
+  category: process_creation
+  product: windows
+detection:
+  selection:
+    ParentImage|endswith: '\svchost.exe'
+    Image|endswith: '\mmc.exe'
+    CommandLine|contains: '-Embedding'
+  filter_main_local_snapin:
+    # Local MMC snap-in COM activation can trigger -Embedding
+    # Filter when followed by known legitimate snap-in loads
+    User|contains: 'SYSTEM'
+  condition: selection and not 1 of filter_main_*
+falsepositives:
+  - Legitimate DCOM activation of MMC snap-ins by local administrators
+  - System Center Configuration Manager remote management
+  - Group Policy Management Console remote operations
+level: medium

@@ -1,0 +1,71 @@
+// Detection: PowerShell Destructive/Wiper Activity
+// Technique: T1059.001 — PowerShell (Destructive Context)
+// Platform:  MDE Advanced Hunting | Severity: Critical
+// Context:   AI-assisted PowerShell wiper for destructive activity
+
+// INVARIANT: PowerShell wipers MUST invoke destructive cmdlets/APIs:
+// Remove-Item -Recurse -Force, Format-Volume, Clear-Disk, [IO.File]::Delete,
+// overwrite with random bytes via [System.IO.FileStream], or call Win32 APIs
+// for raw disk access. These are NOT normal admin patterns at scale.
+
+// Query 1: Destructive PowerShell cmdlets in process command line
+let DestructivePSCmdLine = DeviceProcessEvents
+| where Timestamp > ago(24h)
+| where FileName in~ ("powershell.exe", "pwsh.exe")
+    or ProcessVersionInfoOriginalFileName in~ ("PowerShell.EXE", "pwsh.dll")
+| where ProcessCommandLine has_any (
+    // File destruction
+    "Remove-Item", "del -Force", "ri -Force", "rm -Force",
+    // Disk operations
+    "Format-Volume", "Clear-Disk", "Initialize-Disk",
+    "Clear-RecycleBin",
+    // Raw disk/MBR access via .NET
+    "CreateFile", "\\\\.\\PhysicalDrive", "\\\\.\\PHYSICALDRIVE",
+    "Win32_DiskDrive", "rawwrite",
+    // Bulk operations with -Recurse
+    "Get-ChildItem", "gci",
+    // Service/recovery sabotage
+    "Stop-Service", "Set-Service", "bcdedit", "wbadmin",
+    "vssadmin", "wmic shadowcopy delete",
+    // Encoding/obfuscation with destructive intent
+    "Invoke-Expression", "IEX"
+)
+// Must also contain destructive context (not just cmdlet alone)
+| where ProcessCommandLine has_any (
+    "-Recurse", "-Force", "delete", "wipe", "destroy",
+    "-Confirm:$false", "PhysicalDrive", "shadowcopy",
+    "bcdedit", "recoveryenabled", "no"
+)
+// Exclude SCCM, Defender, Azure Monitor
+| where InitiatingProcessFileName !in~ (
+    "CCMExec.exe", "CcmExec.exe", "MsMpEng.exe",
+    "SenseIR.exe", "MonAgentCore.exe"
+)
+| project
+    Timestamp, DeviceName, AccountName, AccountDomain,
+    ProcessCommandLine, FolderPath,
+    InitiatingProcessFileName, InitiatingProcessCommandLine,
+    InitiatingProcessParentFileName, SHA1, ReportId;
+
+// Query 2: AMSI capture of destructive script content
+let DestructivePSAmsi = DeviceEvents
+| where Timestamp > ago(24h)
+| where ActionType in ("AmsiScriptDetection", "PowerShellCommand", "ScriptContent")
+| where AdditionalFields has_any (
+    "Remove-Item", "Format-Volume", "Clear-Disk",
+    "PhysicalDrive", "wipe", "destroy",
+    "vssadmin delete shadows", "bcdedit /set"
+)
+| project
+    Timestamp, DeviceName, AccountName, AccountDomain = "",
+    ProcessCommandLine = tostring(AdditionalFields), FolderPath = "",
+    InitiatingProcessFileName, InitiatingProcessCommandLine,
+    InitiatingProcessParentFileName = "", SHA1 = "", ReportId;
+
+DestructivePSCmdLine
+| union DestructivePSAmsi
+| extend
+    AlertTitle = "Destructive PowerShell Wiper Activity Detected",
+    MitreTechnique = "T1059.001",
+    Severity = "Critical"
+| sort by Timestamp desc

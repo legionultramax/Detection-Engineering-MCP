@@ -19,7 +19,7 @@ import { listResources, listResourceTemplates, readResource } from './handlers/r
 
 const SERVER_VERSION = '1.0.0';
 
-const SERVER_INSTRUCTIONS = `# House of Hunting MCP
+const SERVER_INSTRUCTIONS = `# Harris HawkEye MCP
 
 ## Tool Categories
 
@@ -83,7 +83,7 @@ function wrapHandler<T, R>(
       return await handler(request);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      console.error(`[house-of-hunting] Error in ${handlerName}: ${message}`);
+      console.error(`[harris-hawkeye-mcp] Error in ${handlerName}: ${message}`);
       throw error;
     }
   };
@@ -92,7 +92,7 @@ function wrapHandler<T, R>(
 export function createServer(): Server {
   const server = new Server(
     {
-      name: 'house-of-hunting-mcp',
+      name: 'harris-hawkeye-mcp',
       version: SERVER_VERSION,
     },
     {

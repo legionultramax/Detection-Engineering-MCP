@@ -42,8 +42,6 @@ import {
   otxSubscribedPulsesFeed,
 } from './otx.js';
 
-// Unified pivot engine
-import { pivotExpandIOCs } from './pivot.js';
 import { 
   getMitreTechnique, searchMitreTechniques, cacheMitreTechnique,
   getCVE, cacheCVE, 
@@ -822,43 +820,6 @@ const otxSubscribedFeedTool = defineTool({
 });
 
 // ---------------------------------------------------------------------------
-// Unified pivot MCP tool
-// ---------------------------------------------------------------------------
-
-const pivotExpandIOCsTool = defineTool({
-  name: 'pivot_expand_iocs',
-  description: 'ELITE: Unified IOC pivot engine. Takes IOCs from an advisory, fans out to abuse.ch + OTX in parallel, auto-follows imphash/actor/family pivots one level deep, deduplicates everything, and returns confidence-ranked discovered IOCs. Feed this the output of ingest_advisory.',
-  inputSchema: {
-    type: 'object',
-    properties: {
-      iocs: {
-        type: 'array',
-        description: 'Input IOCs to pivot on',
-        items: {
-          type: 'object',
-          properties: {
-            type: { type: 'string', enum: ['ip', 'domain', 'hash', 'url'] },
-            value: { type: 'string' },
-          },
-          required: ['type', 'value'],
-        },
-      },
-      actor: { type: 'string', description: 'Optional: threat actor name to include in pivot' },
-      malware_family: { type: 'string', description: 'Optional: malware family name to include in pivot' },
-    },
-    required: ['iocs'],
-  },
-  handler: async (args) => {
-    const { iocs, actor, malware_family } = args as {
-      iocs: Array<{ type: 'ip' | 'domain' | 'hash' | 'url'; value: string }>;
-      actor?: string;
-      malware_family?: string;
-    };
-    return pivotExpandIOCs({ iocs, actor, malware_family });
-  },
-});
-
-// ---------------------------------------------------------------------------
 // Export all tools
 // ---------------------------------------------------------------------------
 
@@ -894,9 +855,7 @@ export const threatIntelTools: ToolDefinition[] = [
   otxSearchActorTool,
   otxGetPulseIOCsTool,
   otxSubscribedFeedTool,
-  // Unified engine
-  pivotExpandIOCsTool,
-  // Vendor threat intelligence (Phase 2 — 12 tools: 2 per vendor × 6 vendors)
+  // Vendor threat intelligence (Phase 2 — deprecated, now via Playwright)
   ...vendorTools,
   // Government & CERT sources (Phase 3 — 10 tools)
   ...governmentTools,

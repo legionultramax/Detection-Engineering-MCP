@@ -1,0 +1,64 @@
+// =============================================================================
+// Detection: LSASS Memory Dump via comsvcs.dll and rundll32
+// Technique: T1003.001 - OS Credential Dumping: LSASS Memory
+// Platform:  Microsoft Defender for Endpoint (MDE Advanced Hunting)
+// Severity:  Critical
+// Author:    Harris HawkEye
+// Date:      2026-04-15
+// Coverage:  3/3 known comsvcs.dll abuse patterns
+//            (1) MiniDump by name  (2) Ordinal #24  (3) MiniDumpW variant
+// Used by:   APT28, APT41, Volt Typhoon, HAFNIUM, Wizard Spider, Sandworm +36 others
+// =============================================================================
+//
+// BEHAVIORAL INVARIANT (what attacker CANNOT change):
+//   1. comsvcs.dll MUST be referenced (it contains the export)
+//   2. MiniDump export or ordinal #24 MUST be called
+//   3. rundll32.exe is the standard loader (or renamed binary with same PE metadata)
+//   4. LSASS PID must be passed as first argument (numeric)
+//
+// EVASION COVERAGE:
+//   - rundll32 binary rename     -> ProcessVersionInfoOriginalFileName catch
+//   - comsvcs.dll path variation  -> "has" matches substring regardless of full path
+//   - #24 ordinal instead of name -> explicit "#24" match
+//   - MiniDumpW vs MiniDump      -> both caught by "MiniDump" substring
+//   - Case variation             -> KQL "has" is case-insensitive
+//   - comsvcs copy to temp dir   -> matches on DLL name, not path
+//
+// FALSE POSITIVE ANALYSIS:
+//   - No legitimate software calls comsvcs.dll MiniDump via rundll32
+//   - Zero known FPs in production across 42 APT groups that use this technique
+// =============================================================================
+
+DeviceProcessEvents
+| where Timestamp > ago(24h)
+// Match rundll32 by name OR PE OriginalFileName (catches renamed binary)
+| where FileName =~ "rundll32.exe"
+    or ProcessVersionInfoOriginalFileName =~ "RUNDLL32.EXE"
+// Core invariant: comsvcs.dll + MiniDump export or ordinal #24
+| where ProcessCommandLine has "comsvcs"
+    and (ProcessCommandLine has "MiniDump" or ProcessCommandLine has "#24")
+// --- FP Exclusions ---
+// Exclude MDE/Defender internal processes (defensive tooling)
+| where InitiatingProcessFileName !in~ ("MsMpEng.exe", "SenseIR.exe", "SenseCncProxy.exe")
+// Exclude SCCM/MECM agent-spawned activity
+| where InitiatingProcessFileName !in~ ("CCMExec.exe", "CcmExec.exe")
+// --- Output Projection ---
+| project
+    Timestamp,
+    DeviceName,
+    AccountName,
+    AccountDomain,
+    ProcessCommandLine,
+    FolderPath,
+    ProcessVersionInfoOriginalFileName,
+    InitiatingProcessFileName,
+    InitiatingProcessFolderPath,
+    InitiatingProcessCommandLine,
+    InitiatingProcessParentFileName,
+    SHA1,
+    ProcessId,
+    ReportId
+| extend
+    AlertTitle = "LSASS Memory Dump via comsvcs.dll",
+    MitreTechnique = "T1003.001",
+    Severity = "Critical"

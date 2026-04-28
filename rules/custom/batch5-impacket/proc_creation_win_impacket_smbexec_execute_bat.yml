@@ -1,0 +1,48 @@
+title: Impacket Smbexec.py Process Execution Via Execute.bat Pattern
+id: e5f6a7b8-1021-4d9e-bf10-smbexeccmd4ee
+status: experimental
+description: >
+  Detects the process-level execution pattern of Impacket's smbexec.py on the target host.
+  The Service Control Manager (services.exe) spawns cmd.exe which creates execute.bat in
+  %TEMP%, writes the command with output redirect to \\127.0.0.1\C$\__output, executes the
+  bat file, and deletes it. This three-stage pattern (create-execute-delete) in a single
+  CommandLine is a hardcoded invariant in smbexec.py. Maps to T1021.002 + T1569.002.
+references:
+  - https://attack.mitre.org/techniques/T1021/002/
+  - https://attack.mitre.org/techniques/T1569/002/
+  - https://github.com/fortra/impacket/blob/master/impacket/examples/smbexec.py
+  - https://www.youtube.com/watch?v=13cubed
+author: Detection Engineering (Harris HawkEye)
+date: 2026-04-15
+modified: 2026-04-15
+tags:
+  - attack.lateral-movement
+  - attack.t1021.002
+  - attack.execution
+  - attack.t1569.002
+  - tool.impacket
+  - tool.impacket.smbexec
+logsource:
+  category: process_creation
+  product: windows
+detection:
+  selection_parent:
+    ParentImage|endswith: '\services.exe'
+  selection_cmd:
+    Image|endswith: '\cmd.exe'
+  selection_pattern_full:
+    CommandLine|contains|all:
+      - '/Q'
+      - '/c'
+      - 'execute.bat'
+      - '127.0.0.1'
+      - '__output'
+  selection_pattern_bat_lifecycle:
+    # Alternate: catch the bat create-execute-delete cycle
+    CommandLine|contains|all:
+      - 'execute.bat'
+      - '& del'
+  condition: selection_parent and selection_cmd and (selection_pattern_full or selection_pattern_bat_lifecycle)
+falsepositives:
+  - No known legitimate software uses services.exe to spawn cmd.exe with execute.bat + __output + 127.0.0.1 in a single command
+level: critical

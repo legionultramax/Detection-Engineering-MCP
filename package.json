@@ -1,12 +1,12 @@
 {
-  "name": "house-of-hunting-mcp",
+  "name": "harris-hawkeye-mcp",
   "version": "1.0.0",
-  "description": "House of Hunting MCP - Security detection engineering, threat intelligence, CVE-to-detection, YARA conversion, and knowledge management for Claude Desktop",
+  "description": "Harris HawkEye MCP - Security detection engineering, threat intelligence, CVE-to-detection, YARA conversion, and knowledge management for Claude Desktop",
   "sigmaSpecVersion": "2.0.0",
   "type": "module",
   "main": "dist/index.js",
   "bin": {
-    "house-of-hunting": "dist/index.js"
+    "harris-hawkeye": "dist/index.js"
   },
   "scripts": {
     "build": "tsc",
@@ -41,17 +41,19 @@
     "ioc",
     "malware"
   ],
-  "author": "House of Hunting",
+  "author": "Harris HawkEye",
   "license": "Apache-2.0",
   "dependencies": {
     "@iarna/toml": "^2.2.5",
     "@modelcontextprotocol/sdk": "^1.25.3",
+    "docx": "^9.6.1",
+    "pptxgenjs": "^4.0.1",
     "sql.js": "^1.10.0",
     "yaml": "^2.4.0"
   },
   "devDependencies": {
-    "@types/sql.js": "^1.4.9",
     "@types/node": "^20.0.0",
+    "@types/sql.js": "^1.4.9",
     "typescript": "^5.4.0"
   },
   "engines": {

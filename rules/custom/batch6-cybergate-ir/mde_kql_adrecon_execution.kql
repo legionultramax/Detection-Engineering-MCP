@@ -1,0 +1,117 @@
+// =============================================================================
+// Detection: ADRecon Active Directory Reconnaissance Tool Execution
+// Technique: T1087.002 - Account Discovery: Domain Account
+// Platform:  Microsoft Defender for Endpoint (MDE Advanced Hunting)
+// Severity:  High
+// Author:    Harris HawkEye
+// Date:      2026-04-15
+// Coverage:  3/3 ADRecon execution vectors
+//            (1) PowerShell cmdline invocation  (2) AMSI script content capture
+//            (3) ADRecon output file creation (.xlsx/.csv)
+// Used by:   FIN7 (confirmed), general red team / pentest tooling
+// =============================================================================
+//
+// BEHAVIORAL INVARIANT (what attacker CANNOT change):
+//   1. ADRecon.ps1 contains unique function names: Get-ADRExcelComOb,
+//      Get-ADRGPO, Get-ADRDomainController, Invoke-ADRecon
+//   2. Output file is always "ADRecon-Report" with .xlsx or .csv extension
+//   3. Script must run inside PowerShell (powershell.exe or pwsh.exe)
+//   4. AMSI captures ScriptBlock content regardless of obfuscation
+//
+// EVASION COVERAGE:
+//   - Script rename (ADRecon.ps1 -> audit.ps1) -> caught by function names in
+//     AMSI/ScriptContent or output filenames, not script name
+//   - Dot-sourcing / Import-Module / IEX -> all captured by cmdline or AMSI
+//   - PowerShell 7 (pwsh.exe)            -> included in process filter
+//   - Case variation                      -> KQL "has" is case-insensitive
+//   - Obfuscated invocation               -> AMSI deobfuscates before logging
+//
+// FALSE POSITIVES:
+//   - Authorized AD auditors / compliance teams running ADRecon
+//   - Purple team exercises with approved tooling
+//   Mitigated by: alert triage confirming authorized change ticket
+// =============================================================================
+
+// --- Vector 1: Process command line detection ---
+let ADReconCmdLine = DeviceProcessEvents
+| where Timestamp > ago(24h)
+// PowerShell host process (catches both Windows PowerShell and PS7)
+| where FileName in~ ("powershell.exe", "pwsh.exe")
+    or ProcessVersionInfoOriginalFileName in~ ("PowerShell.EXE", "pwsh.dll")
+// ADRecon-specific keywords in command line
+| where ProcessCommandLine has_any (
+    "ADRecon",
+    "Invoke-ADRecon",
+    "Get-ADRDomainController",
+    "Get-ADRExcelComOb",
+    "Get-ADRGPO",
+    "ADRecon-Report"
+)
+// Exclude IT-approved audit tooling paths (customize per org)
+// | where FolderPath !startswith @"C:\Tools\Approved\"
+| project
+    Timestamp,
+    DeviceName,
+    AccountName,
+    AccountDomain,
+    DetectionVector = "ProcessCommandLine",
+    Evidence = ProcessCommandLine,
+    FolderPath,
+    InitiatingProcessFileName,
+    InitiatingProcessCommandLine,
+    SHA1,
+    ReportId;
+
+// --- Vector 2: AMSI / ScriptBlock capture in DeviceEvents ---
+let ADReconAMSI = DeviceEvents
+| where Timestamp > ago(24h)
+| where ActionType in ("AmsiScriptDetection", "PowerShellCommand", "ScriptContent")
+| where AdditionalFields has_any (
+    "Get-ADRExcelComOb",
+    "Get-ADRGPO",
+    "Get-ADRDomainController",
+    "Invoke-ADRecon",
+    "ADRecon-Report"
+)
+| project
+    Timestamp,
+    DeviceName,
+    AccountName,
+    AccountDomain = "",
+    DetectionVector = "AMSI_ScriptContent",
+    Evidence = tostring(AdditionalFields),
+    FolderPath = "",
+    InitiatingProcessFileName,
+    InitiatingProcessCommandLine,
+    SHA1 = "",
+    ReportId;
+
+// --- Vector 3: ADRecon output file creation ---
+let ADReconFiles = DeviceFileEvents
+| where Timestamp > ago(24h)
+| where ActionType == "FileCreated"
+| where (FileName has "ADRecon-Report")
+    or (FileName has "ADRecon" and FileName endswith ".xlsx")
+    or (FileName has "ADRecon" and FileName endswith ".csv")
+    or (FolderPath has "ADRecon" and FileName endswith ".xlsx")
+| project
+    Timestamp,
+    DeviceName,
+    AccountName,
+    AccountDomain = "",
+    DetectionVector = "OutputFileCreated",
+    Evidence = strcat(FolderPath, "\\", FileName),
+    FolderPath,
+    InitiatingProcessFileName,
+    InitiatingProcessCommandLine,
+    SHA1,
+    ReportId;
+
+// --- Combine all vectors ---
+ADReconCmdLine
+| union ADReconAMSI, ADReconFiles
+| extend
+    AlertTitle = "ADRecon AD Reconnaissance Tool Detected",
+    MitreTechnique = "T1087.002",
+    Severity = "High"
+| sort by Timestamp desc

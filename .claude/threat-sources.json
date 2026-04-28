@@ -32,7 +32,7 @@
       },
       "refresh_interval_hours": 720,
       "enabled": true,
-      "notes": "Core baseline. Official MITRE ATT&CK group definitions with technique mappings. Updates monthly. Also available via house-of-hunting MITRE tools (get_threat_group, search_threat_groups). Scrape for alias cross-reference and new group additions."
+      "notes": "Core baseline. Official MITRE ATT&CK group definitions with technique mappings. Updates monthly. Also available via harris-hawkeye MITRE tools (get_threat_group, search_threat_groups). Scrape for alias cross-reference and new group additions."
     },
     {
       "id": "src_002",
@@ -355,6 +355,606 @@
       "refresh_interval_hours": 168,
       "enabled": true,
       "notes": "MUST-HAVE for alias cross-reference. Community-maintained Google Sheet mapping ALL known actor aliases across ALL vendors. Updated weekly. Best single source for resolving CrowdStrike<->Microsoft<->MITRE<->Kaspersky naming overlaps. No MCP tool — Playwright only. NOTE: Google Sheets may require specific Playwright handling."
+    },
+
+    {
+      "id": "src_016",
+      "name": "Elastic Security Labs Blog",
+      "url": "https://www.elastic.co/security-labs",
+      "category": "vendor_research",
+      "priority": 1,
+      "tags": ["elastic", "detection-rules", "eql", "yara", "malware-analysis", "hunting"],
+      "scrape_config": {
+        "method": "playwright",
+        "wait_seconds": 4,
+        "content_selector": null,
+        "pagination": false,
+        "max_pages": 1
+      },
+      "relevance": {
+        "industries": ["all"],
+        "regions": ["all"],
+        "scenarios": ["all"]
+      },
+      "refresh_interval_hours": 168,
+      "enabled": true,
+      "notes": "TIER 1 for detection engineers. Publishes EQL, KQL, YARA, and Sigma rules inline in every post. Malware reverse engineering with detection logic embedded. Reports include full indicator tables and detection guidance. No MCP tool — Playwright only. Critical for extracting EQL queries directly."
+    },
+
+    {
+      "id": "src_017",
+      "name": "Splunk Security Research (research.splunk.com)",
+      "url": "https://research.splunk.com/",
+      "category": "vendor_research",
+      "priority": 1,
+      "tags": ["splunk", "spl", "detections", "escu", "hunting", "detection-engineering"],
+      "scrape_config": {
+        "method": "playwright",
+        "wait_seconds": 3,
+        "content_selector": null,
+        "pagination": true,
+        "max_pages": 3
+      },
+      "relevance": {
+        "industries": ["all"],
+        "regions": ["all"],
+        "scenarios": ["all"]
+      },
+      "refresh_interval_hours": 168,
+      "enabled": true,
+      "notes": "GOLD STANDARD for SPL detection queries. Splunk Threat Research Team publishes detection rules with full SPL, data model mappings, and MITRE ATT&CK alignment. Complements the ESCU rules already indexed in harris-hawkeye. Use browser_evaluate to extract SPL code blocks from each detection page."
+    },
+
+    {
+      "id": "src_018",
+      "name": "Threat Hunter Playbook (OTRF)",
+      "url": "https://threathunterplaybook.com/hunts/windows/intro.html",
+      "category": "community",
+      "priority": 1,
+      "tags": ["otrf", "hunting-queries", "kql", "eql", "sparql", "mitre", "windows", "detection"],
+      "scrape_config": {
+        "method": "playwright",
+        "wait_seconds": 3,
+        "content_selector": null,
+        "pagination": true,
+        "max_pages": 5
+      },
+      "relevance": {
+        "industries": ["all"],
+        "regions": ["all"],
+        "scenarios": ["all"]
+      },
+      "refresh_interval_hours": 720,
+      "enabled": true,
+      "notes": "ELITE for detection query extraction. Open Threat Research Foundation playbook maps every MITRE technique to hunting queries in KQL, EQL, Spark, and SPARQL. Directly actionable detection content. Use browser_evaluate on <code> blocks to extract queries. Also: https://github.com/OTRF/ThreatHunter-Playbook for raw YAML."
+    },
+
+    {
+      "id": "src_019",
+      "name": "Malware Traffic Analysis (Brad Duncan)",
+      "url": "https://www.malware-traffic-analysis.net/",
+      "category": "community",
+      "priority": 1,
+      "tags": ["pcap", "network-detection", "c2", "iocs", "malware-samples", "suricata", "snort"],
+      "scrape_config": {
+        "method": "playwright",
+        "wait_seconds": 3,
+        "content_selector": null,
+        "pagination": false,
+        "max_pages": 1
+      },
+      "relevance": {
+        "industries": ["all"],
+        "regions": ["all"],
+        "scenarios": ["ransomware", "ecrime", "c2"]
+      },
+      "refresh_interval_hours": 48,
+      "enabled": true,
+      "notes": "MUST-HAVE for network-based detection. Brad Duncan publishes daily malware PCAP analysis with Suricata/Snort rules, C2 infrastructure, and network IOCs. Key for writing network detection rules (NDR, NGFW, proxy). No MCP tool — Playwright only. Extraction target: Snort/Suricata rule blocks in posts."
+    },
+
+    {
+      "id": "src_020",
+      "name": "Nextron Systems / Florian Roth Blog",
+      "url": "https://www.nextron-systems.com/blog/",
+      "category": "community",
+      "priority": 1,
+      "tags": ["sigma", "yara", "thor", "florian-roth", "detection-rules", "hunting", "sigma-creator"],
+      "scrape_config": {
+        "method": "playwright",
+        "wait_seconds": 3,
+        "content_selector": null,
+        "pagination": false,
+        "max_pages": 1
+      },
+      "relevance": {
+        "industries": ["all"],
+        "regions": ["all"],
+        "scenarios": ["all"]
+      },
+      "refresh_interval_hours": 168,
+      "enabled": true,
+      "notes": "Florian Roth created Sigma and YARA-X. Blog contains elite detection engineering content, new rule techniques, evasion counter-techniques, and THOR hunting notes. Every post is actionable for detection engineers. Also see: https://github.com/Neo23x0 for YARA and Sigma rule sets."
+    },
+
+    {
+      "id": "src_021",
+      "name": "AttackerKB (Rapid7 Exploit Intelligence)",
+      "url": "https://attackerkb.com/topics/recent",
+      "category": "exploit_intel",
+      "priority": 1,
+      "tags": ["attacker-kb", "exploits", "cve", "vulnerability", "proof-of-concept", "epss", "detection"],
+      "scrape_config": {
+        "method": "playwright",
+        "wait_seconds": 4,
+        "content_selector": null,
+        "pagination": false,
+        "max_pages": 1
+      },
+      "relevance": {
+        "industries": ["all"],
+        "regions": ["all"],
+        "scenarios": ["vulnerability", "exploitation", "cve"]
+      },
+      "refresh_interval_hours": 24,
+      "enabled": true,
+      "notes": "Community-powered CVE exploit intelligence. Researchers document exploitation techniques, PoC availability, and detection guidance per CVE. Critical for CVE-to-detection workflow. Pairs perfectly with harris-hawkeye cve_to_detection tool and EPSS/KEV lookups. No MCP tool — Playwright only."
+    },
+
+    {
+      "id": "src_022",
+      "name": "Ransomware.live Leak Site Tracker",
+      "url": "https://www.ransomware.live/",
+      "category": "community",
+      "priority": 1,
+      "tags": ["ransomware", "leak-sites", "victims", "ttps", "real-time", "groups", "extortion"],
+      "scrape_config": {
+        "method": "playwright",
+        "wait_seconds": 5,
+        "content_selector": null,
+        "pagination": false,
+        "max_pages": 1
+      },
+      "relevance": {
+        "industries": ["all"],
+        "regions": ["all"],
+        "scenarios": ["ransomware", "extortion"]
+      },
+      "refresh_interval_hours": 24,
+      "enabled": true,
+      "notes": "Real-time ransomware group tracking. 100+ active ransomware groups, victim counts, sector targeting, leak site monitoring. Indispensable for understanding which groups are active and which sectors are being targeted TODAY. Use for threat profiling and hunt prioritization. No MCP tool — Playwright only."
+    },
+
+    {
+      "id": "src_023",
+      "name": "Feodo Tracker (abuse.ch C2 Botnet Intel)",
+      "url": "https://feodotracker.abuse.ch/browse/",
+      "category": "ioc_feed",
+      "priority": 1,
+      "tags": ["abuse-ch", "c2", "botnet", "ip", "ioc", "emotet", "cobalt-strike", "qbot", "network"],
+      "scrape_config": {
+        "method": "playwright",
+        "wait_seconds": 3,
+        "content_selector": null,
+        "pagination": false,
+        "max_pages": 1
+      },
+      "relevance": {
+        "industries": ["all"],
+        "regions": ["all"],
+        "scenarios": ["ransomware", "c2", "botnet", "ecrime"]
+      },
+      "refresh_interval_hours": 6,
+      "enabled": true,
+      "notes": "abuse.ch C2 tracking for Emotet, QBot, Dridex, Cobalt Strike, BazarLoader. Complements the existing abuse.ch API tools (urlhaus_lookup_host, threatfox_search_ioc) with network-level C2 IPs for firewall/NDR detections. Also use the CSV export at https://feodotracker.abuse.ch/downloads/ipblocklist.csv for bulk extraction."
+    },
+
+    {
+      "id": "src_024",
+      "name": "LOLDrivers (Vulnerable Driver Intelligence)",
+      "url": "https://www.loldrivers.io/",
+      "category": "detection_resource",
+      "priority": 1,
+      "tags": ["loldrivers", "bring-your-own-driver", "byod", "kernel", "edr-bypass", "detection"],
+      "scrape_config": {
+        "method": "playwright",
+        "wait_seconds": 3,
+        "content_selector": null,
+        "pagination": false,
+        "max_pages": 1
+      },
+      "relevance": {
+        "industries": ["all"],
+        "regions": ["all"],
+        "scenarios": ["all"]
+      },
+      "refresh_interval_hours": 168,
+      "enabled": true,
+      "notes": "CRITICAL for EDR-bypass detection. Tracks vulnerable and malicious Windows kernel drivers used in BYOVD attacks. Every driver entry has hash, CVE, and known exploiting groups. Essential for writing driver-load detections (Sysmon EventID 6, Windows ETW). Pairs with harris-hawkeye lookup_lolbas tool. CSV download available."
+    },
+
+    {
+      "id": "src_025",
+      "name": "HijackLibs (DLL Hijacking Intelligence)",
+      "url": "https://hijacklibs.net/",
+      "category": "detection_resource",
+      "priority": 1,
+      "tags": ["dll-hijacking", "side-loading", "persistence", "defense-evasion", "lolbas-extension"],
+      "scrape_config": {
+        "method": "playwright",
+        "wait_seconds": 3,
+        "content_selector": null,
+        "pagination": false,
+        "max_pages": 1
+      },
+      "relevance": {
+        "industries": ["all"],
+        "regions": ["all"],
+        "scenarios": ["all"]
+      },
+      "refresh_interval_hours": 336,
+      "enabled": true,
+      "notes": "Community database of DLL hijacking opportunities. Every entry maps executable → hijackable DLL → detection method. Critical for writing DLL side-loading detections (T1574.001/002). Extends the existing LOLBAS data in harris-hawkeye. Use browser_evaluate to extract the full table data."
+    },
+
+    {
+      "id": "src_026",
+      "name": "Check Point Research (CPR)",
+      "url": "https://research.checkpoint.com/",
+      "category": "vendor_research",
+      "priority": 2,
+      "tags": ["checkpoint", "cpr", "apt", "malware-analysis", "mobile", "nation-state", "reverse-engineering"],
+      "scrape_config": {
+        "method": "playwright",
+        "wait_seconds": 4,
+        "content_selector": null,
+        "pagination": false,
+        "max_pages": 1
+      },
+      "relevance": {
+        "industries": ["all"],
+        "regions": ["middle-east", "all"],
+        "scenarios": ["apt", "espionage", "ransomware"]
+      },
+      "refresh_interval_hours": 168,
+      "enabled": true,
+      "notes": "Strong on Middle East actors (Hamas-linked, MuddyWater, Iranian groups) and mobile malware. Deep reverse engineering with IOC tables. Good for regional threat coverage. Publishes YARA rules embedded in reports. No MCP tool — Playwright only."
+    },
+
+    {
+      "id": "src_027",
+      "name": "ESET WeLiveSecurity Research",
+      "url": "https://www.welivesecurity.com/en/eset-research/",
+      "category": "vendor_research",
+      "priority": 2,
+      "tags": ["eset", "apt", "eastern-europe", "latin-america", "yara", "iocs", "sandworm", "lazarus"],
+      "scrape_config": {
+        "method": "playwright",
+        "wait_seconds": 4,
+        "content_selector": null,
+        "pagination": false,
+        "max_pages": 1
+      },
+      "relevance": {
+        "industries": ["government", "energy", "telecom"],
+        "regions": ["eastern-europe", "latin-america", "all"],
+        "scenarios": ["apt", "espionage"]
+      },
+      "refresh_interval_hours": 168,
+      "enabled": true,
+      "notes": "Strong on Eastern European APTs (Sandworm, Gamaredon, Turla) and Latin American banking trojans. Publishes YARA rules and IoC lists in each report. Detailed malware analysis with detection recommendations. No MCP tool — Playwright only."
+    },
+
+    {
+      "id": "src_028",
+      "name": "Trend Micro Research Blog",
+      "url": "https://www.trendmicro.com/en_us/research.html",
+      "category": "vendor_research",
+      "priority": 2,
+      "tags": ["trend-micro", "apt", "china", "ransomware", "iot", "cloud", "supply-chain"],
+      "scrape_config": {
+        "method": "playwright",
+        "wait_seconds": 5,
+        "content_selector": null,
+        "pagination": false,
+        "max_pages": 1
+      },
+      "relevance": {
+        "industries": ["manufacturing", "retail", "technology"],
+        "regions": ["asia-pacific", "all"],
+        "scenarios": ["apt", "ransomware", "supply-chain"]
+      },
+      "refresh_interval_hours": 168,
+      "enabled": true,
+      "notes": "Strong on China-nexus actors (Earth Estries, Earth Preta, etc.) and Asia-Pacific threats. Good IoT and cloud threat coverage. Naming convention: Earth *** for uncategorised actors. Weekly updates. No MCP tool — Playwright only."
+    },
+
+    {
+      "id": "src_029",
+      "name": "Zscaler ThreatLabz Research",
+      "url": "https://www.zscaler.com/blogs/security-research",
+      "category": "vendor_research",
+      "priority": 2,
+      "tags": ["zscaler", "threatlabz", "cloud", "proxy", "malware", "phishing", "apt"],
+      "scrape_config": {
+        "method": "playwright",
+        "wait_seconds": 4,
+        "content_selector": null,
+        "pagination": false,
+        "max_pages": 1
+      },
+      "relevance": {
+        "industries": ["technology", "finance", "healthcare"],
+        "regions": ["all"],
+        "scenarios": ["apt", "phishing", "cloud"]
+      },
+      "refresh_interval_hours": 168,
+      "enabled": true,
+      "notes": "Strong on cloud-delivered threats, phishing infrastructure, and proxy-based evasion techniques. Publishes annual phishing and ransomware reports with detection guidance. Useful for writing proxy/web gateway detection rules. No MCP tool — Playwright only."
+    },
+
+    {
+      "id": "src_030",
+      "name": "Proofpoint Threat Research (Threat Insight)",
+      "url": "https://www.proofpoint.com/us/blog/threat-insight",
+      "category": "vendor_research",
+      "priority": 2,
+      "tags": ["proofpoint", "ta-actors", "phishing", "email", "initial-access", "malware-distribution"],
+      "scrape_config": {
+        "method": "playwright",
+        "wait_seconds": 4,
+        "content_selector": null,
+        "pagination": false,
+        "max_pages": 1
+      },
+      "relevance": {
+        "industries": ["all"],
+        "regions": ["all"],
+        "scenarios": ["phishing", "initial-access", "ecrime"]
+      },
+      "refresh_interval_hours": 168,
+      "enabled": true,
+      "notes": "BEST source for email-based initial access TTPs. TA*** naming (TA505, TA558, TA577, etc.). Tracks malware distribution campaigns with full email header indicators, attachment hashes, and URL patterns. Critical for writing email gateway and initial-access detections. No MCP tool — Playwright only."
+    },
+
+    {
+      "id": "src_031",
+      "name": "Cybereason Global SOC Research",
+      "url": "https://www.cybereason.com/blog/category/research",
+      "category": "vendor_research",
+      "priority": 2,
+      "tags": ["cybereason", "dprk", "lazarus", "ransomware", "behavioral-detection", "endpoint"],
+      "scrape_config": {
+        "method": "playwright",
+        "wait_seconds": 4,
+        "content_selector": null,
+        "pagination": false,
+        "max_pages": 1
+      },
+      "relevance": {
+        "industries": ["all"],
+        "regions": ["all"],
+        "scenarios": ["apt", "ransomware"]
+      },
+      "refresh_interval_hours": 168,
+      "enabled": true,
+      "notes": "Strong on DPRK/Lazarus attribution and behavioral endpoint detection techniques. Publishes malware operation analyses with detection logic and behavioral indicators. Good for writing EDR behavioral detections. No MCP tool — Playwright only."
+    },
+
+    {
+      "id": "src_032",
+      "name": "ENISA Threat Landscape Reports",
+      "url": "https://www.enisa.europa.eu/topics/cyber-threats/enisa-threat-landscape",
+      "category": "government",
+      "priority": 2,
+      "tags": ["enisa", "eu", "threat-landscape", "etl", "annual", "sector-reports", "europe"],
+      "scrape_config": {
+        "method": "playwright",
+        "wait_seconds": 4,
+        "content_selector": null,
+        "pagination": false,
+        "max_pages": 1
+      },
+      "relevance": {
+        "industries": ["all"],
+        "regions": ["europe", "all"],
+        "scenarios": ["all"]
+      },
+      "refresh_interval_hours": 720,
+      "enabled": true,
+      "notes": "EU Agency for Cybersecurity annual threat landscape. Sector-specific ETL reports (health, transport, energy, finance). Strategic-level TTP breakdowns by region and sector. Useful for building threat profiles for EU-based engagements. No MCP tool — Playwright only."
+    },
+
+    {
+      "id": "src_033",
+      "name": "CERT-FR (French CERT) Advisories",
+      "url": "https://www.cert.ssi.gouv.fr/actualite/",
+      "category": "government",
+      "priority": 2,
+      "tags": ["cert-fr", "france", "apt28", "apt29", "sandworm", "advisories", "iocs", "europe"],
+      "scrape_config": {
+        "method": "playwright",
+        "wait_seconds": 3,
+        "content_selector": null,
+        "pagination": false,
+        "max_pages": 1
+      },
+      "relevance": {
+        "industries": ["government", "defense", "energy"],
+        "regions": ["europe", "france"],
+        "scenarios": ["apt", "espionage"]
+      },
+      "refresh_interval_hours": 168,
+      "enabled": true,
+      "notes": "ANSSI/CERT-FR publishes highly technical advisories on Russian APTs (APT28, APT29, Sandworm) and critical infrastructure attacks. Reports include full IOC lists and detection indicators. Complements existing anssi_search MCP tool — Playwright gets the full technical content. Also see https://www.cert.ssi.gouv.fr/ioc/ for IOC feeds."
+    },
+
+    {
+      "id": "src_034",
+      "name": "BSI (German Federal Office for IS) Cyber Reports",
+      "url": "https://www.bsi.bund.de/EN/Themen/Unternehmen-und-Organisationen/Cybersicherheitslage/Cybersicherheitslage_node.html",
+      "category": "government",
+      "priority": 2,
+      "tags": ["bsi", "germany", "apt", "ransomware", "critical-infrastructure", "europe"],
+      "scrape_config": {
+        "method": "playwright",
+        "wait_seconds": 4,
+        "content_selector": null,
+        "pagination": false,
+        "max_pages": 1
+      },
+      "relevance": {
+        "industries": ["government", "manufacturing", "energy"],
+        "regions": ["europe", "germany"],
+        "scenarios": ["apt", "ransomware", "critical-infrastructure"]
+      },
+      "refresh_interval_hours": 336,
+      "enabled": true,
+      "notes": "German Federal Office for Information Security. Strong on threats to manufacturing and critical infrastructure (Germany is top ransomware target in Europe). Annual IT Security Situation report is highly detailed with TTP breakdowns. No MCP tool — Playwright only."
+    },
+
+    {
+      "id": "src_035",
+      "name": "ANY.RUN Malware Trends Feed",
+      "url": "https://any.run/malware-trends/",
+      "category": "ioc_feed",
+      "priority": 1,
+      "tags": ["anyrun", "malware-trends", "live", "sandboxing", "iocs", "behavioral", "families"],
+      "scrape_config": {
+        "method": "playwright",
+        "wait_seconds": 5,
+        "content_selector": null,
+        "pagination": false,
+        "max_pages": 1
+      },
+      "relevance": {
+        "industries": ["all"],
+        "regions": ["all"],
+        "scenarios": ["all"]
+      },
+      "refresh_interval_hours": 24,
+      "enabled": true,
+      "notes": "Live malware trending from ANY.RUN public sandbox. Shows which malware families are most active RIGHT NOW with execution data. Complements existing anyrun_trending MCP tool — Playwright extracts richer trend data and behavioral tags. Essential for daily brief and hunt prioritization. Also browse specific family pages for Sigma-mappable behaviors."
+    },
+
+    {
+      "id": "src_036",
+      "name": "SigmaHQ GitHub Releases (New Rule Drops)",
+      "url": "https://github.com/SigmaHQ/sigma/releases",
+      "category": "detection_resource",
+      "priority": 1,
+      "tags": ["sigma", "sigmahq", "new-rules", "releases", "detection-engineering", "community-rules"],
+      "scrape_config": {
+        "method": "playwright",
+        "wait_seconds": 3,
+        "content_selector": null,
+        "pagination": false,
+        "max_pages": 1
+      },
+      "relevance": {
+        "industries": ["all"],
+        "regions": ["all"],
+        "scenarios": ["all"]
+      },
+      "refresh_interval_hours": 48,
+      "enabled": true,
+      "notes": "Track new Sigma rule additions to the community repository. Release notes list every new rule with technique coverage. Complements the 3,110 Sigma rules already indexed in harris-hawkeye — use this to identify what's NEW since last index. Use browser_evaluate on release body to extract new rule names and T-IDs."
+    },
+
+    {
+      "id": "src_037",
+      "name": "Hybrid Analysis (Public Malware Samples)",
+      "url": "https://www.hybrid-analysis.com/feed?json",
+      "category": "ioc_feed",
+      "priority": 2,
+      "tags": ["hybrid-analysis", "sandbox", "malware", "iocs", "hashes", "behavioral", "public-feed"],
+      "scrape_config": {
+        "method": "playwright",
+        "wait_seconds": 3,
+        "content_selector": null,
+        "pagination": false,
+        "max_pages": 1
+      },
+      "relevance": {
+        "industries": ["all"],
+        "regions": ["all"],
+        "scenarios": ["all"]
+      },
+      "refresh_interval_hours": 24,
+      "enabled": true,
+      "notes": "Public sandbox feed of recent malware submissions with verdicts, hashes, and behavioral tags. Use the JSON feed endpoint directly for structured data extraction. Useful for hunting IOCs and understanding current malware behaviors. Pairs with bazaar_lookup_hash and threatfox_search_ioc MCP tools."
+    },
+
+    {
+      "id": "src_038",
+      "name": "Binary Defense Blog (Detection Engineering Focus)",
+      "url": "https://www.binarydefense.com/resources/blog/",
+      "category": "community",
+      "priority": 2,
+      "tags": ["binary-defense", "detection-engineering", "endpoint", "splunk", "sigma", "hunting"],
+      "scrape_config": {
+        "method": "playwright",
+        "wait_seconds": 4,
+        "content_selector": null,
+        "pagination": false,
+        "max_pages": 1
+      },
+      "relevance": {
+        "industries": ["all"],
+        "regions": ["all"],
+        "scenarios": ["all"]
+      },
+      "refresh_interval_hours": 168,
+      "enabled": true,
+      "notes": "Detection-engineering-focused blog. Publishes Splunk and Sigma detection content with detailed reasoning. Strong on endpoint behavioral detections and SOC workflow content. No MCP tool — Playwright only. Content often includes full SPL queries ready for extraction."
+    },
+
+    {
+      "id": "src_039",
+      "name": "ired.team Red Team Notes (Detection Opportunities)",
+      "url": "https://www.ired.team/",
+      "category": "community",
+      "priority": 1,
+      "tags": ["red-team", "ttp-techniques", "detection-opportunities", "offensive", "evasion", "windows"],
+      "scrape_config": {
+        "method": "playwright",
+        "wait_seconds": 3,
+        "content_selector": null,
+        "pagination": false,
+        "max_pages": 1
+      },
+      "relevance": {
+        "industries": ["all"],
+        "regions": ["all"],
+        "scenarios": ["all"]
+      },
+      "refresh_interval_hours": 720,
+      "enabled": true,
+      "notes": "ELITE for understanding attacker perspective to write better detections. Covers every major Windows attack technique with code, artifacts, and detection notes. Each page maps to MITRE techniques and lists what artifacts are generated (registry keys, event IDs, file paths) — perfect detection engineering reference. Use Playwright to extract technique artifact tables."
+    },
+
+    {
+      "id": "src_040",
+      "name": "LOLOL Farm (Extended LOL Resources)",
+      "url": "https://lolol.farm/",
+      "category": "detection_resource",
+      "priority": 2,
+      "tags": ["lolol", "living-off-the-land", "lolbas", "gtfobins", "lolbin", "evasion", "proxy"],
+      "scrape_config": {
+        "method": "playwright",
+        "wait_seconds": 3,
+        "content_selector": null,
+        "pagination": false,
+        "max_pages": 1
+      },
+      "relevance": {
+        "industries": ["all"],
+        "regions": ["all"],
+        "scenarios": ["all"]
+      },
+      "refresh_interval_hours": 336,
+      "enabled": true,
+      "notes": "Aggregates ALL living-off-the-land resources: LOLBAS, GTFOBins, LOLDrivers, WADComs, HijackLibs, and more. Single source for detecting abuse of legitimate system tools. Extends the existing lolbas and gtfobins tables in harris-hawkeye. Use browser_evaluate to extract all binary entries across categories."
     }
   ]
 }

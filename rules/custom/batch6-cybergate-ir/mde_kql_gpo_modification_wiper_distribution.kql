@@ -1,0 +1,34 @@
+// Detection: GPO Modification for Payload Distribution
+// Technique: T1484.001 — Group Policy Modification
+// Platform:  MDE Advanced Hunting | Severity: Critical
+// Context:   Wipers distributed via GPO (Handala wiper chain)
+// Used by:   APT41, Indrik Spider, Cinnamon Tempest, Storm-0501
+
+// INVARIANT: GPO changes write to SYSVOL\Policies\{GUID}. Attackers must touch
+// this path to push payloads via GPO. Legitimate GPO edits come from mmc.exe (GPME)
+// or PowerShell Group Policy module — anything else is suspicious.
+
+// Query 1: Suspicious file writes to SYSVOL GPO paths
+DeviceFileEvents
+| where Timestamp > ago(24h)
+| where ActionType in ("FileCreated", "FileModified")
+| where FolderPath has @"\SYSVOL\" and FolderPath has @"\Policies\"
+// Wiper indicators: executables, scripts, or batch files pushed to GPO
+| where FileName endswith_cs ".exe"
+    or FileName endswith_cs ".dll"
+    or FileName endswith_cs ".bat"
+    or FileName endswith_cs ".ps1"
+    or FileName endswith_cs ".vbs"
+    or FileName endswith_cs ".cmd"
+    or FileName endswith_cs ".hta"
+// Exclude legitimate GPO management tools
+| where InitiatingProcessFileName !in~ ("mmc.exe", "gpupdate.exe", "svchost.exe")
+| where InitiatingProcessFileName !in~ ("MsMpEng.exe", "SenseIR.exe")
+| project
+    Timestamp, DeviceName, AccountName, FileName, FolderPath,
+    InitiatingProcessFileName, InitiatingProcessCommandLine,
+    InitiatingProcessFolderPath, SHA1, ReportId
+| extend
+    AlertTitle = "Suspicious Payload Written to GPO SYSVOL Path",
+    MitreTechnique = "T1484.001",
+    Severity = "Critical"

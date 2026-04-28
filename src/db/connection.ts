@@ -12,12 +12,57 @@ function getDbPath(): string {
   if (process.env.DETECTIONS_DB_PATH) {
     return process.env.DETECTIONS_DB_PATH;
   }
-  
-  const dbDir = path.join(os.tmpdir(), 'security-detections-mcp');
+
+  const dbDir = path.join(os.homedir(), '.cache', 'security-detections-mcp');
   if (!fs.existsSync(dbDir)) {
     fs.mkdirSync(dbDir, { recursive: true });
   }
   return path.join(dbDir, 'detections.db');
+}
+
+// Migrate existing databases by adding any new columns that may be missing
+function migrateDetectionsTable(db: SqlJsDatabase): void {
+  const newColumns: Record<string, string> = {
+    logsource_category: 'TEXT',
+    logsource_product: 'TEXT',
+    logsource_service: 'TEXT',
+    cves: 'TEXT',
+    analytic_stories: 'TEXT',
+    data_sources: 'TEXT',
+    detection_type: 'TEXT',
+    asset_type: 'TEXT',
+    security_domain: 'TEXT',
+    process_names: 'TEXT',
+    file_paths_found: 'TEXT',
+    registry_paths: 'TEXT',
+    platforms: 'TEXT',
+    kql_category: 'TEXT',
+    kql_tags: 'TEXT',
+    kql_keywords: 'TEXT',
+  };
+
+  // Get existing columns via PRAGMA
+  const existingCols = new Set<string>();
+  try {
+    const stmt = db.prepare('PRAGMA table_info(detections)');
+    while (stmt.step()) {
+      const row = stmt.getAsObject() as { name: string };
+      existingCols.add(row.name);
+    }
+    stmt.free();
+  } catch {
+    return;
+  }
+
+  for (const [col, type] of Object.entries(newColumns)) {
+    if (!existingCols.has(col)) {
+      try {
+        db.run(`ALTER TABLE detections ADD COLUMN ${col} ${type}`);
+      } catch {
+        // Column already exists or other error — safe to ignore
+      }
+    }
+  }
 }
 
 export async function initDbAsync(): Promise<SqlJsDatabase> {
@@ -60,13 +105,46 @@ export async function initDbAsync(): Promise<SqlJsDatabase> {
       false_positives TEXT,
       search_text TEXT,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-      updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      logsource_category TEXT,
+      logsource_product TEXT,
+      logsource_service TEXT,
+      cves TEXT,
+      analytic_stories TEXT,
+      data_sources TEXT,
+      detection_type TEXT,
+      asset_type TEXT,
+      security_domain TEXT,
+      process_names TEXT,
+      file_paths_found TEXT,
+      registry_paths TEXT,
+      platforms TEXT,
+      kql_category TEXT,
+      kql_tags TEXT,
+      kql_keywords TEXT
     )
   `);
-  
+
+  // Migrate existing databases: add any new columns that may be missing
+  migrateDetectionsTable(db);
+
+  // Base indexes
   db.run(`CREATE INDEX IF NOT EXISTS idx_detections_source ON detections(source_type)`);
   db.run(`CREATE INDEX IF NOT EXISTS idx_detections_severity ON detections(severity)`);
   db.run(`CREATE INDEX IF NOT EXISTS idx_detections_name ON detections(name)`);
+
+  // Enrichment field indexes
+  db.run(`CREATE INDEX IF NOT EXISTS idx_logsource_product ON detections(logsource_product)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_logsource_category ON detections(logsource_category)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_detection_type ON detections(detection_type)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_asset_type ON detections(asset_type)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_security_domain ON detections(security_domain)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_kql_category ON detections(kql_category)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_platforms ON detections(platforms)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_cves ON detections(cves)`);
+
+  // Note: sql.js WASM build does not include FTS5.
+  // Search uses multi-column LIKE across all enriched fields (see search_detections tool).
   
   db.run(`
     CREATE TABLE IF NOT EXISTS stories (

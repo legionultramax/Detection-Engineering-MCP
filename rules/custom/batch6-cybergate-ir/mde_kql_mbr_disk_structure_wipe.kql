@@ -1,0 +1,48 @@
+// Detection: MBR / Disk Structure Wipe (Handala Wiper Pattern)
+// Technique: T1561.002 — Disk Structure Wipe
+// Platform:  MDE Advanced Hunting | Severity: Critical
+// Context:   MBR-based wiping by custom Handala wiper
+// Used by:   Sandworm (NotPetya, WhisperGate), Lazarus, APT38
+
+// INVARIANT: MBR/disk structure wipe requires raw access to \\.\PhysicalDrive0
+// via CreateFile API. MDE captures this via DeviceEvents RawAccessRead or
+// process creation with PhysicalDrive in command line. No legitimate user-mode
+// process should access PhysicalDrive0 directly except disk utilities.
+
+// Query 1: Process accessing raw disk (PhysicalDrive) — command line indicator
+DeviceProcessEvents
+| where Timestamp > ago(24h)
+| where ProcessCommandLine has_any (
+    @"\\.\PhysicalDrive", @"\\.\PHYSICALDRIVE",
+    @"\\.\HarddiskVolume", @"\\.\C:",
+    "rawdisk", "MBR", "mbr"
+)
+// Exclude legitimate disk management tools
+| where FileName !in~ (
+    "diskmgmt.msc", "diskpart.exe", "chkdsk.exe",
+    "defrag.exe", "sfc.exe", "dism.exe",
+    "wbengine.exe", "vds.exe", "vdsldr.exe"
+)
+| where InitiatingProcessFileName !in~ ("MsMpEng.exe", "SenseIR.exe", "services.exe")
+| project
+    Timestamp, DeviceName, AccountName, FileName, FolderPath,
+    ProcessCommandLine, InitiatingProcessFileName,
+    InitiatingProcessCommandLine, SHA1, ReportId
+| extend
+    AlertTitle = "Raw Disk Access Detected (Potential MBR Wipe)",
+    MitreTechnique = "T1561.002",
+    Severity = "Critical";
+
+// Query 2: DeviceEvents — raw disk access API calls
+// DeviceEvents
+// | where Timestamp > ago(24h)
+// | where ActionType == "RawAccessRead"
+// | where AdditionalFields has_any ("PhysicalDrive", "HarddiskVolume")
+// | where InitiatingProcessFileName !in~ (
+//     "System", "chkdsk.exe", "defrag.exe", "vds.exe", "wbengine.exe"
+// )
+// | project Timestamp, DeviceName, AccountName, ActionType,
+//           InitiatingProcessFileName, InitiatingProcessCommandLine,
+//           AdditionalFields, ReportId
+// | extend AlertTitle = "Raw Disk Read API Call (MBR Wipe Indicator)",
+//          MitreTechnique = "T1561.002", Severity = "Critical"

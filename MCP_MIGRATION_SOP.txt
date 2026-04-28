@@ -1,0 +1,391 @@
+================================================================================
+         HARRIS HAWKEYE MCP - SERVER MIGRATION SOP
+         Standard Operating Procedure v1.1
+         Date: April 2026
+================================================================================
+
+OVERVIEW
+--------
+This document provides step-by-step instructions for migrating the Harris
+HawkEye MCP to a company server environment.
+
+WHAT YOU'RE MIGRATING
+---------------------
+- Harris HawkEye MCP (105 tools, 6 prompts)
+- 11,800+ Detection Rules (Sigma, Splunk ESCU, Elastic, KQL)
+- MITRE ATT&CK Database (835 techniques, 187 groups, 787 software)
+- Knowledge Graph System
+- Claude Code Skills (7) — at ~/.claude/skills/ on source machine (separate copy step)
+- CLAUDE.md Workflow Guide
+
+TOTAL SIZE: ~4.5 GB (project) + ~50 MB (skills)
+
+================================================================================
+                         PRE-REQUISITES (TARGET SERVER)
+================================================================================
+
+1. Node.js v18 or higher
+   - Check: node --version
+   - Download: https://nodejs.org/
+
+2. npm (comes with Node.js)
+   - Check: npm --version
+
+3. Claude Desktop installed
+   - Download: https://claude.ai/download
+
+4. Internet access (one-time, for npm install)
+   - If no internet, see OFFLINE INSTALLATION section below
+
+================================================================================
+                         PHASE 1: COPY FILES
+================================================================================
+
+OPTION A: USB/Hard Drive Transfer
+---------------------------------
+1. Copy entire folder:
+   FROM: C:\Users\harsh\OneDrive\Desktop\security-detections-mcp
+   TO:   [USB DRIVE]\security-detections-mcp
+
+2. On target server, copy to desired location:
+   RECOMMENDED: C:\Tools\security-detections-mcp
+
+OPTION B: Network Transfer
+--------------------------
+1. Zip the folder (exclude node_modules to reduce size):
+   - Right-click folder > Send to > Compressed (zipped) folder
+   - Or use: tar -cvf mcp.tar security-detections-mcp --exclude=node_modules
+
+2. Transfer via network share, SFTP, or cloud storage
+
+3. Extract on target server
+
+================================================================================
+                         PHASE 2: INSTALL & BUILD
+================================================================================
+
+Open PowerShell/Command Prompt on target server:
+
+STEP 1: Navigate to folder
+--------------------------
+cd C:\Tools\security-detections-mcp
+
+STEP 2: Install dependencies
+----------------------------
+npm install
+
+Expected output: "added XXX packages"
+Time: 1-3 minutes (depends on network)
+
+STEP 3: Build TypeScript
+------------------------
+npm run build
+
+Expected output: No errors, creates/updates dist\ folder
+Time: ~30 seconds
+
+STEP 4: Verify installation
+---------------------------
+node dist\index.js
+
+Expected output:
+  [security-detections-mcp] Starting Enhanced Security Detections MCP...
+  [db] Initializing database...
+  [security-detections-mcp] Auto-indexing detections...
+  [security-detections-mcp] Indexed XXXX detections
+  [security-detections-mcp] Indexing MITRE ATT&CK...
+  [tools] Registry initialized with 122 tools
+
+Press Ctrl+C to stop after verification.
+
+================================================================================
+                         PHASE 3: CONFIGURE CLAUDE DESKTOP
+================================================================================
+
+STEP 1: Locate config file
+--------------------------
+Windows: %APPDATA%\Claude\claude_desktop_config.json
+Mac:     ~/Library/Application Support/Claude/claude_desktop_config.json
+
+STEP 2: Edit configuration
+--------------------------
+Open the file in a text editor and add/replace with:
+
+{
+  "mcpServers": {
+    "harris-hawkeye": {
+      "command": "node",
+      "args": ["C:\\Tools\\security-detections-mcp\\dist\\index.js"],
+      "env": {
+        "SIGMA_PATHS": "C:\\Tools\\security-detections-mcp\\rules\\sigma\\rules",
+        "SPLUNK_PATHS": "C:\\Tools\\security-detections-mcp\\rules\\splunk\\detections",
+        "ELASTIC_PATHS": "C:\\Tools\\security-detections-mcp\\rules\\elastic\\rules",
+        "KQL_PATHS": "C:\\Tools\\security-detections-mcp\\rules\\sentinel\\Hunting Queries",
+        "OTX_API_KEY": "YOUR_OTX_API_KEY_HERE"
+      }
+    }
+  }
+}
+
+IMPORTANT: 
+- Replace all paths with actual install location
+- Use double backslashes (\\) in Windows paths
+- OTX_API_KEY is optional (8 OTX tools won't work without it)
+
+STEP 3: Restart Claude Desktop
+------------------------------
+- Completely close Claude Desktop
+- Reopen Claude Desktop
+- Check Settings > Developer to verify MCP is connected
+
+================================================================================
+                    PHASE 4: MIGRATE CLAUDE CODE SKILLS
+================================================================================
+
+The seven detection engineering skills live in the source user's profile directory,
+NOT in the project folder. They must be copied separately.
+
+SOURCE LOCATION:
+  C:\Users\harsh\.claude\skills\
+
+SKILLS TO COPY (all seven):
+  detect-engineer\         -- 5-platform rule authoring (Sigma/KQL/SPL/ESCU/Elastic TOML)
+  advisory-ingest\         -- CISA/DFIR advisory parser
+  detection-validator\     -- Pre-deployment ART-based validation
+  data-source-mapper\      -- Telemetry gap analysis
+  killchain-synth\         -- Multi-phase correlated query builder
+  coverage-reporter\       -- Hunt card + Word export
+  navigator-layer-gen\     -- ATT&CK Navigator JSON layer generator (coverage/actor/gap)
+
+STEP 1: Copy skills folder on source machine
+--------------------------------------------
+  xcopy C:\Users\harsh\.claude\skills C:\Temp\hoh-skills-backup /E /I /H
+
+STEP 2: Transfer to target machine (USB/network)
+
+STEP 3: Copy to target user's Claude profile
+--------------------------------------------
+  On target server, run:
+  xcopy C:\Temp\hoh-skills-backup %USERPROFILE%\.claude\skills /E /I /H
+
+  (Creates the ~/.claude/skills/ directory if it doesn't exist)
+
+STEP 4: Verify skills are in place
+------------------------------------
+  dir %USERPROFILE%\.claude\skills\
+
+  Expected: detect-engineer, advisory-ingest, detection-validator,
+            data-source-mapper, killchain-synth, coverage-reporter,
+            navigator-layer-gen
+
+NOTE: Skills are loaded by Claude Desktop at session start. No build step
+required — they are plain Markdown + reference files.
+
+NOTE: If Claude Code is used (not just Claude Desktop), also copy:
+  C:\Users\harsh\.claude\MEMORY.md and the memory\ directory
+  This preserves the Knowledge Graph learnings captured across sessions.
+
+================================================================================
+                         PHASE 6: VERIFICATION
+================================================================================
+
+In Claude Desktop, test the following:
+
+TEST 1: Basic connectivity
+--------------------------
+Ask: "What tools do you have available from harris-hawkeye?"
+Expected: List of 105 tools
+
+TEST 2: Detection search
+------------------------
+Ask: "Search for detections related to mimikatz"
+Expected: Returns matching detection rules
+
+TEST 3: MITRE ATT&CK
+--------------------
+Ask: "What techniques does APT29 use?"
+Expected: Returns techniques from MITRE database
+
+TEST 4: Coverage analysis
+-------------------------
+Ask: "Analyze my detection coverage for ransomware"
+Expected: Returns coverage report
+
+================================================================================
+                         OFFLINE INSTALLATION (No Internet)
+================================================================================
+
+If target server has no internet access:
+
+BEFORE TRANSFER (on source machine):
+------------------------------------
+1. Ensure node_modules is included in copy:
+   - Do NOT exclude node_modules folder
+   - Total size will be ~4.7 GB instead of ~4.5 GB
+
+2. Copy pre-built dist folder:
+   - Ensure dist\ folder is included
+
+ON TARGET SERVER:
+-----------------
+1. Copy folder to target location
+2. Skip "npm install" step
+3. Skip "npm run build" step (already built)
+4. Go directly to "Verify installation" step
+
+================================================================================
+                         TROUBLESHOOTING
+================================================================================
+
+ISSUE: "npm install" fails
+--------------------------
+Cause: Network/proxy issues
+Solution: 
+  - Check proxy settings: npm config set proxy http://proxy:port
+  - Or use offline installation method
+
+ISSUE: "npm run build" fails
+----------------------------
+Cause: TypeScript errors or missing dependencies
+Solution:
+  - Delete node_modules and package-lock.json
+  - Run: npm install
+  - Run: npm run build
+
+ISSUE: MCP not showing in Claude Desktop
+----------------------------------------
+Cause: Config file errors
+Solution:
+  - Verify JSON syntax (no trailing commas)
+  - Verify all paths exist
+  - Restart Claude Desktop completely
+  - Check Settings > Developer for error messages
+
+ISSUE: "Module not found" errors
+--------------------------------
+Cause: Incomplete npm install
+Solution:
+  - Run: npm install
+  - Run: npm run build
+
+ISSUE: Database errors / no detections found
+--------------------------------------------
+Cause: Corrupt or missing database
+Solution:
+  - Delete database file:
+    Windows: del %USERPROFILE%\.cache\security-detections-mcp\detections.db
+  - Restart MCP (will auto-reindex)
+
+ISSUE: MITRE ATT&CK data not available
+--------------------------------------
+Cause: STIX file not found
+Solution:
+  - Verify file exists: rules\elastic\detection_rules\etc\attack-v18.1.0.json.gz
+  - If missing, the MITRE tools will be limited
+
+ISSUE: OTX tools not working
+----------------------------
+Cause: Missing or invalid API key
+Solution:
+  - Get free API key from: https://otx.alienvault.com
+  - Add to OTX_API_KEY in config
+
+================================================================================
+                         POST-MIGRATION CHECKLIST
+================================================================================
+
+[ ] Folder copied to target server
+[ ] npm install completed successfully
+[ ] npm run build completed successfully
+[ ] node dist\index.js runs without errors
+[ ] Claude Desktop config updated with correct paths
+[ ] Claude Desktop restarted
+[ ] MCP shows in Claude Desktop Developer settings
+[ ] Test query returns results
+[ ] All 105 tools available
+[ ] Skills folder copied to %USERPROFILE%\.claude\skills\
+[ ] All 7 skills visible (detect-engineer, advisory-ingest, detection-validator,
+    data-source-mapper, killchain-synth, coverage-reporter, navigator-layer-gen)
+
+================================================================================
+                         QUICK REFERENCE - PATHS
+================================================================================
+
+SOURCE (Your Machine):
+  Project:  C:\Users\harsh\Desktop\security-detections-mcp
+  Database: %USERPROFILE%\.cache\security-detections-mcp\detections.db
+  Skills:   %USERPROFILE%\.claude\skills\
+  Config:   %APPDATA%\Claude\claude_desktop_config.json
+
+TARGET (Company Server):
+  Project:  C:\Tools\security-detections-mcp (recommended)
+  Database: Auto-created at %USERPROFILE%\.cache\security-detections-mcp\
+  Skills:   %USERPROFILE%\.claude\skills\
+  Config:   %APPDATA%\Claude\claude_desktop_config.json
+
+================================================================================
+                         QUICK REFERENCE - COMMANDS
+================================================================================
+
+Install:     npm install
+Build:       npm run build
+Test:        node dist\index.js
+Delete DB:   del %USERPROFILE%\.cache\security-detections-mcp\detections.db
+Copy Skills: xcopy %USERPROFILE%\.claude\skills TARGET_USER\.claude\skills /E /I /H
+
+================================================================================
+                         CAPABILITIES AFTER MIGRATION
+================================================================================
+
+DETECTION TOOLS (15):
+  search_detections, get_detection, list_by_mitre, list_by_severity,
+  list_by_mitre_tactic, list_by_process_name, list_by_cve,
+  list_by_logsource, list_by_data_source, get_stats,
+  analyze_coverage, identify_gaps, cve_to_detection,
+  convert_yara_to_sigma, convert_sigma_to_kql
+
+MITRE ATT&CK TOOLS (11):
+  get_threat_group, search_threat_groups, get_software, search_software,
+  get_mitigations, get_data_sources, list_campaigns,
+  get_groups_using_technique, get_software_using_technique,
+  get_mitre_attack_stats, list_data_sources
+
+ATOMIC RED TEAM TOOLS (6):
+  art_get_tests, art_search, art_get_test, art_validate_technique,
+  art_get_stats, art_coverage_report
+
+COVERAGE ENGINE TOOLS (6):
+  coverage_ingest_log, coverage_assess_session, coverage_gaps_detail,
+  coverage_compare, coverage_recommend, coverage_list_mappings
+
+THREAT INTEL TOOLS (51):
+  abuse.ch (URLhaus, ThreatFox, MalwareBazaar)
+  AlienVault OTX (requires API key)
+  NVD/EPSS/CISA KEV, Malpedia, ANY.RUN, LOLBAS, MISP warninglist
+  Correlation Engine (ti_actor_full_profile, ti_hunt_package, etc.)
+
+KNOWLEDGE GRAPH TOOLS (8):
+  create_entity, search_entities, create_relation, log_decision,
+  get_decisions, add_learning, get_learnings, get_knowledge_summary
+
+TOTAL: 105 TOOLS
+
+DETECTION ENGINEERING SKILLS (7) — loaded from ~/.claude/skills/:
+  detect-engineer       -- Sigma | KQL | SPL | ESCU YAML | Elastic TOML
+  advisory-ingest       -- CISA/vendor/DFIR gap analysis
+  detection-validator   -- ART-mapped pre-deployment validation
+  data-source-mapper    -- Telemetry gap + Sysmon/audit config
+  killchain-synth       -- Multi-phase correlated KQL/SPL/Sigma
+  coverage-reporter     -- Hunt cards + Word .docx export
+  navigator-layer-gen   -- ATT&CK Navigator JSON layers (coverage/actor/gap)
+
+================================================================================
+                         SUPPORT & DOCUMENTATION
+================================================================================
+
+Workflow Guide: CLAUDE.md (in project root)
+README:         README.md (in project root)
+
+================================================================================
+                              END OF DOCUMENT
+================================================================================

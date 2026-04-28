@@ -1,0 +1,45 @@
+// Detection: Network Logon Script Modification for Destructive Payloads
+// Technique: T1037.003 — Network Logon Script
+// Platform:  MDE Advanced Hunting | Severity: Critical
+// Context:   Logon scripts used to trigger destructive wiper components
+// Note:      FULL GAP — zero existing detections in any platform for T1037.003
+
+// INVARIANT: Network logon scripts reside in NETLOGON share (SYSVOL\scripts or
+// NETLOGON mapped path). Modifying these requires writing to DC SYSVOL.
+// Legitimate changes are rare and come from AD admins via mmc.exe/GPME.
+
+// Query 1: File writes to NETLOGON / logon script directories
+DeviceFileEvents
+| where Timestamp > ago(24h)
+| where ActionType in ("FileCreated", "FileModified")
+| where FolderPath has_any (@"\NETLOGON\", @"\scripts\", @"\SYSVOL\")
+| where FileName endswith_cs ".bat"
+    or FileName endswith_cs ".cmd"
+    or FileName endswith_cs ".ps1"
+    or FileName endswith_cs ".vbs"
+    or FileName endswith_cs ".exe"
+    or FileName endswith_cs ".js"
+    or FileName endswith_cs ".wsf"
+// Exclude GPO engine and legitimate admin tools
+| where InitiatingProcessFileName !in~ ("mmc.exe", "gpupdate.exe", "svchost.exe", "dfsrs.exe", "dfsr.exe", "ntfrs.exe")
+| where InitiatingProcessFileName !in~ ("MsMpEng.exe", "SenseIR.exe")
+| project
+    Timestamp, DeviceName, AccountName, FileName, FolderPath,
+    InitiatingProcessFileName, InitiatingProcessCommandLine,
+    InitiatingProcessFolderPath, SHA1, ReportId
+| extend
+    AlertTitle = "Logon Script Modified in NETLOGON/SYSVOL",
+    MitreTechnique = "T1037.003",
+    Severity = "Critical";
+
+// Query 2: Process execution with logon script indicators (UserInitMprLogonScript)
+// DeviceRegistryEvents
+// | where Timestamp > ago(24h)
+// | where RegistryKey has @"Environment"
+// | where RegistryValueName =~ "UserInitMprLogonScript"
+// | where ActionType == "RegistryValueSet"
+// | project Timestamp, DeviceName, AccountName, RegistryKey,
+//           RegistryValueName, RegistryValueData,
+//           InitiatingProcessFileName, InitiatingProcessCommandLine, ReportId
+// | extend AlertTitle = "User Logon Script Set via Registry",
+//          MitreTechnique = "T1037.003", Severity = "High"

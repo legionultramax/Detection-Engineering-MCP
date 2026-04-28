@@ -48,3 +48,19 @@ elastic-rules/
 
 # Keep custom rules directory tracked (our own rules)
 !rules/custom/
+
+# Atomic Red Team repository (external git repo, auto-cloned on startup)
+data/atomic-red-team/
+
+# Sublime rules (external repo, re-clone on new machine)
+data/sublime-rules/
+
+# Browser MCP cache
+.playwright-mcp/
+
+# Client-specific profiles — never commit
+client-profiles/
+
+# Generated outputs / working artifacts
+navigator-layers/
+*.docx

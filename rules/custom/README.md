@@ -1,6 +1,6 @@
 # Custom Detection Rules — Session-Built Sigma Rules Index
 
-> **Total**: 106 Sigma detection rules built across 4 sessions
+> **Total**: 127 detection rules built across 6 sessions (116 Sigma + 11 MDE KQL)
 > **Author**: Detection Engineering (Claude-assisted)
 > **Date**: February 2026
 > **Framework**: MITRE ATT&CK mapped, WAT-41 self-tested
@@ -153,10 +153,85 @@ YARA rules converted to Sigma format for SIEM integration.
 | Privilege Escalation | T1055.001, T1055.012, T1574.001, T1574.002 | 8 |
 | Defense Evasion | T1218.005, T1197, T1574.002 | 5 |
 | Credential Access | T1003.001, T1003.006, T1558.001/003/004, T1555.003, T1528 | 10 |
-| Lateral Movement | T1021.001, T1021.002, T1047 | 5 |
+| Lateral Movement | T1021.001, T1021.002, T1021.003, T1047, T1053.005 | 15 |
 | Collection | T1114.002, T1082 | 3 |
 | Command and Control | T1071.001, T1071.004, T1572, T1090.001, T1219 | 18 |
 | Impact | T1485, T1486, T1561.001, T1561.002 | 11 |
+
+## Batch 5 — Impacket Lateral Movement Suite (10 rules)
+
+High-fidelity detections for all five Impacket lateral movement tools based on forensic
+artifact analysis (13Cubed). Native Windows logs only — no Sysmon dependencies.
+Source: `rules/custom/batch5-impacket/`
+
+| # | Rule File | Technique | Tool | Severity | Log Source |
+|---|---|---|---|---|---|
+| 107 | `proc_creation_win_impacket_atexec_cmd_pattern.yml` | T1053.005 | atexec.py | High | 4688 process_creation |
+| 108 | `proc_creation_win_impacket_dcomexec_mmc_cmd_pattern.yml` | T1021.003 | dcomexec.py | Critical | 4688 process_creation |
+| 109 | `proc_creation_win_impacket_dcomexec_mmc_embedding.yml` | T1021.003 | dcomexec.py | Medium | 4688 process_creation |
+| 110 | `system_win_impacket_smbexec_service_install.yml` | T1021.002, T1569.002 | smbexec.py | Critical | System 7045 |
+| 111 | `proc_creation_win_impacket_smbexec_execute_bat.yml` | T1021.002, T1569.002 | smbexec.py | Critical | 4688 process_creation |
+| 112 | `proc_creation_win_impacket_psexec_random_exe.yml` | T1021.002, T1569.002 | psexec.py | Critical | 4688 process_creation |
+| 113 | `proc_creation_win_impacket_wmiexec_cmd_pattern.yml` | T1047 | wmiexec.py | Critical | 4688 process_creation |
+| 114 | `proc_creation_win_impacket_lateral_admin_share_output.yml` | T1047, T1021.003 | wmiexec+dcomexec | Critical | 4688 process_creation |
+| 115 | `security_win_impacket_psexec_service_install.yml` | T1021.002, T1569.002 | psexec.py | Critical | Security 4697 |
+| 116 | `security_win_impacket_lateral_logon_type3_burst.yml` | T1021, T1078 | ALL (correlation) | Medium | Security 4624 |
+
+### Impacket Detection Matrix
+
+| Tool | Invariant | Primary Rule | Secondary Rule | Blocked by Defender |
+|---|---|---|---|---|
+| **atexec.py** | svchost→cmd /C + Windows\Temp\{8rand}.tmp | #107 | — | No |
+| **dcomexec.py** | mmc.exe -Embedding → cmd /Q /c + ADMIN$\__5digits | #108 | #109 (mmc -Embedding) | No |
+| **smbexec.py** | services.exe→cmd + execute.bat + __output | #111 | #110 (7045 service) | Yes |
+| **psexec.py** | services.exe→C:\Windows\{8rand}.exe | #112 | #115 (4697 service) | Yes |
+| **wmiexec.py** | wmiprvse→cmd /Q /c + ADMIN$\__epoch | #113 | #114 (cross-tool) | No |
+
+## Batch 6 — Cyber Gate Defense IR: MDE KQL Detections (4 rules)
+
+High-fidelity KQL detections for Microsoft Defender for Endpoint (MDE Advanced Hunting).
+Derived from Cyber Gate Defense LLC incident response findings. No Sysmon dependencies.
+Source: `rules/custom/batch6-cybergate-ir/`
+
+| # | Rule File | Technique | Attack Vector | Severity | MDE Table |
+|---|---|---|---|---|---|
+| 117 | `mde_kql_lsass_dump_comsvcs_dll.kql` | T1003.001 | LSASS dump via rundll32 + comsvcs.dll | Critical | DeviceProcessEvents |
+| 118 | `mde_kql_sam_hive_export_reg.kql` | T1003.002 | SAM/SYSTEM/SECURITY hive export via reg.exe | High | DeviceProcessEvents |
+| 119 | `mde_kql_adrecon_execution.kql` | T1087.002 | ADRecon AD enumeration (3 detection vectors) | High | DeviceProcessEvents + DeviceEvents + DeviceFileEvents |
+| 120 | `mde_kql_rdp_lateral_movement_burst.kql` | T1021.001 | RDP multi-host hopping (burst detection) | High | DeviceLogonEvents |
+
+### Detection Architecture
+
+| Rule | Behavioral Invariant | Evasion Coverage | FP Risk |
+|---|---|---|---|
+| **#117 comsvcs.dll** | comsvcs.dll + MiniDump/#24 via rundll32 — cannot change DLL export | Binary rename (PE OriginalFileName), ordinal #24, case, path | Near-zero |
+| **#118 SAM hive** | reg.exe save/export of HKLM\SAM\|SYSTEM\|SECURITY — fixed paths | Binary rename, hklm vs hkey_local_machine, save vs export | Low (backup agents excluded) |
+| **#119 ADRecon** | Unique function names (Get-ADRExcelComOb, Get-ADRGPO) + output filename | 3 vectors: cmdline + AMSI + file creation; catches rename/obfuscation | Low (authorized audits) |
+| **#120 RDP burst** | LogonType RemoteInteractive + 3+ distinct hosts in 1h window | Client-agnostic (server-side logon); includes tunnel detection | Medium (tune per org) |
+
+### Handala Wiper Chain Detections (Rules #121–#127)
+
+| # | Rule File | Technique | Attack Vector | Severity | MDE Table |
+|---|---|---|---|---|---|
+| 121 | `mde_kql_gpo_modification_wiper_distribution.kql` | T1484.001 | Executable/script pushed to SYSVOL GPO paths | Critical | DeviceFileEvents |
+| 122 | `mde_kql_logon_script_modification.kql` | T1037.003 | Script written to NETLOGON/SYSVOL for logon trigger | Critical | DeviceFileEvents |
+| 123 | `mde_kql_scheduled_task_wiper_execution.kql` | T1053.005 | schtasks /create with wiper payload paths | High | DeviceProcessEvents |
+| 124 | `mde_kql_powershell_destructive_wiper.kql` | T1059.001 | Destructive PS cmdlets (Remove-Item, Format-Volume, PhysicalDrive) + AMSI | Critical | DeviceProcessEvents + DeviceEvents |
+| 125 | `mde_kql_mbr_disk_structure_wipe.kql` | T1561.002 | Raw PhysicalDrive access for MBR/disk overwrite | Critical | DeviceProcessEvents |
+| 126 | `mde_kql_data_destruction_mass_deletion.kql` | T1485 | 100+ file deletions in 5min burst from single process | High | DeviceFileEvents |
+| 127 | `mde_kql_veracrypt_disk_encryption_abuse.kql` | T1486 | VeraCrypt CLI automation + non-standard drop path + driver load | Critical | DeviceProcessEvents + DeviceFileEvents + DeviceImageLoadEvents |
+
+### Handala Wiper Kill-Chain Matrix
+
+| Phase | Technique | Rule | Invariant | FP Risk |
+|---|---|---|---|---|
+| **Distribution** | T1484.001 GPO | #121 | Exe/script in SYSVOL\Policies\ not from mmc.exe | Low |
+| **Distribution** | T1037.003 Logon Script | #122 | Script in NETLOGON\ not from GPO engine | Low |
+| **Execution** | T1053.005 Sched Task | #123 | schtasks /create + suspicious path + SYSTEM | Medium (tune) |
+| **Execution** | T1059.001 PowerShell | #124 | Destructive cmdlets + -Recurse -Force + AMSI | Low |
+| **Impact** | T1561.002 MBR Wipe | #125 | PhysicalDrive raw access from user-mode process | Near-zero |
+| **Impact** | T1485 Data Destroy | #126 | 100+ FileDeleted in 5min from one process | Medium (tune threshold) |
+| **Impact** | T1486 VeraCrypt | #127 | CLI /encrypt /silent from non-standard path | Low |
 
 ---
 

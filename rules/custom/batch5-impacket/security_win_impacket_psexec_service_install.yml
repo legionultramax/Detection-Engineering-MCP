@@ -1,0 +1,43 @@
+title: Impacket Psexec.py Suspicious Service Installation Via Security Log
+id: c9d0e1f2-1021-4bd2-f354-psexecsvc8cc
+status: experimental
+description: >
+  Detects Impacket psexec.py service installation via Windows Security Event 4697. Impacket
+  psexec.py creates a service with a random 4-character mixed-case alpha name referencing an
+  8-character mixed-case alpha .exe in %systemroot%. This regex-based detection catches the
+  pattern regardless of the specific random characters. The service type is "own process" (0x10)
+  and start type is "demand start" (3), matching RemComSvc deployment behavior.
+references:
+  - https://attack.mitre.org/techniques/T1021/002/
+  - https://attack.mitre.org/techniques/T1569/002/
+  - https://github.com/fortra/impacket/blob/master/impacket/examples/psexec.py
+  - https://www.youtube.com/watch?v=13cubed
+author: Detection Engineering (Harris HawkEye)
+date: 2026-04-15
+modified: 2026-04-15
+tags:
+  - attack.lateral-movement
+  - attack.t1021.002
+  - attack.execution
+  - attack.t1569.002
+  - tool.impacket
+  - tool.impacket.psexec
+logsource:
+  product: windows
+  service: security
+detection:
+  selection:
+    EventID: 4697
+    ServiceFileName|re: '(?i)^%systemroot%\\[a-zA-Z]{8}\.exe$'
+  selection_service_type:
+    # RemComSvc uses demand-start, own-process
+    ServiceStartType: 3
+    ServiceType: '0x10'
+  filter_main_psexesvc:
+    # Sysinternals PsExec uses PSEXESVC (8 chars) but service name is also PSEXESVC, not random 4-char
+    ServiceName: 'PSEXESVC'
+  condition: selection and selection_service_type and not 1 of filter_main_*
+falsepositives:
+  - Other remote administration tools that install demand-start services from %systemroot% with random names
+  - Metasploit psexec module uses similar pattern (4/8/16 char service names)
+level: critical

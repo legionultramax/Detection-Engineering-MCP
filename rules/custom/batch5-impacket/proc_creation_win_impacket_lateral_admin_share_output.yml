@@ -1,0 +1,46 @@
+title: Impacket Cross-Tool Lateral Movement ADMIN Share Output Redirect
+id: b8c9d0e1-cafe-4ac1-e243-impacketxxx7bb
+status: experimental
+description: >
+  Detects the shared behavioral pattern across multiple Impacket lateral movement tools
+  (wmiexec.py, dcomexec.py) where cmd.exe /Q /c is executed with output redirected to
+  \\127.0.0.1\ADMIN$\__ — a loopback ADMIN$ share path with double-underscore prefix.
+  This single rule catches both wmiexec and dcomexec regardless of parent process, providing
+  defense-in-depth when parent process logging is unavailable. Also catches custom Impacket
+  forks that may change the parent process but retain the output redirect pattern.
+references:
+  - https://attack.mitre.org/techniques/T1047/
+  - https://attack.mitre.org/techniques/T1021/003/
+  - https://github.com/fortra/impacket
+  - https://www.youtube.com/watch?v=13cubed
+author: Detection Engineering (Harris HawkEye)
+date: 2026-04-15
+modified: 2026-04-15
+tags:
+  - attack.execution
+  - attack.t1047
+  - attack.lateral-movement
+  - attack.t1021.003
+  - tool.impacket
+logsource:
+  category: process_creation
+  product: windows
+detection:
+  selection_cmd:
+    Image|endswith: '\cmd.exe'
+  selection_pattern:
+    CommandLine|contains|all:
+      - '/Q'
+      - '/c'
+  selection_admin_redirect:
+    CommandLine|contains|all:
+      - '\\127.0.0.1\ADMIN$\__'
+      - '2>&1'
+  filter_main_false_positive:
+    # No known legitimate process uses this exact pattern
+    ParentImage|endswith:
+      - '\explorer.exe'
+  condition: selection_cmd and selection_pattern and selection_admin_redirect and not 1 of filter_main_*
+falsepositives:
+  - No known legitimate use — the \\127.0.0.1\ADMIN$\__ pattern with cmd.exe /Q /c is exclusively associated with Impacket tooling
+level: critical

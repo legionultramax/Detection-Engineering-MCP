@@ -1,0 +1,69 @@
+// Detection: VeraCrypt Disk Encryption Abuse for Ransomware/Impact
+// Technique: T1486 — Data Encrypted for Impact
+// Platform:  MDE Advanced Hunting | Severity: Critical
+// Context:   VeraCrypt used to encrypt disks as part of destructive attack
+// Used by:   Magic Hound/APT35, Sandworm, ransomware operators
+
+// INVARIANT: VeraCrypt CLI (VeraCrypt.exe or veracrypt.exe) with /volume, /create,
+// or /encrypt switches indicates programmatic disk encryption — not normal user
+// behavior. Legitimate VeraCrypt use is interactive GUI, not CLI-automated.
+// Also detect VeraCrypt driver load (veracrypt.sys) on systems where it's not expected.
+
+// Query 1: VeraCrypt CLI execution with encryption parameters
+let VeraCryptCLI = DeviceProcessEvents
+| where Timestamp > ago(24h)
+| where FileName in~ ("VeraCrypt.exe", "veracrypt.exe", "VeraCrypt Format.exe")
+    or ProcessVersionInfoOriginalFileName in~ ("VeraCrypt.exe", "VeraCrypt Format.exe")
+// CLI automation indicators (not GUI interactive use)
+| where ProcessCommandLine has_any (
+    "/volume", "/create", "/encrypt", "/hash", "/password",
+    "/silent", "/quit", "/auto", "/dismount",
+    "/keyfile", "/pim", "/truecrypt",
+    // Silent/background mode = attacker automation
+    "/q", "/s", "/l"
+)
+| where InitiatingProcessFileName !in~ ("MsMpEng.exe", "SenseIR.exe", "explorer.exe")
+| project
+    Timestamp, DeviceName, AccountName, AccountDomain,
+    DetectionVector = "VeraCrypt_CLI_Execution",
+    FileName, FolderPath, ProcessCommandLine,
+    InitiatingProcessFileName, InitiatingProcessCommandLine,
+    SHA1, ReportId;
+
+// Query 2: VeraCrypt first-time appearance on endpoint (new binary)
+let VeraCryptNewBinary = DeviceFileEvents
+| where Timestamp > ago(24h)
+| where ActionType == "FileCreated"
+| where FileName in~ ("VeraCrypt.exe", "veracrypt.exe", "VeraCrypt Format.exe", "veracrypt.sys")
+// Not from standard installer paths
+| where FolderPath !startswith @"C:\Program Files\VeraCrypt\"
+    and FolderPath !startswith @"C:\Program Files (x86)\VeraCrypt\"
+| project
+    Timestamp, DeviceName, AccountName, AccountDomain = "",
+    DetectionVector = "VeraCrypt_Dropped_NonStandard_Path",
+    FileName, FolderPath, ProcessCommandLine = "",
+    InitiatingProcessFileName, InitiatingProcessCommandLine,
+    SHA1, ReportId;
+
+// Query 3: VeraCrypt driver loaded (veracrypt.sys) — indicates volume mounting
+let VeraCryptDriver = DeviceImageLoadEvents
+| where Timestamp > ago(24h)
+| where FileName =~ "veracrypt.sys"
+| project
+    Timestamp, DeviceName, AccountName, AccountDomain = "",
+    DetectionVector = "VeraCrypt_Driver_Loaded",
+    FileName, FolderPath, ProcessCommandLine = "",
+    InitiatingProcessFileName, InitiatingProcessCommandLine,
+    SHA1 = "", ReportId;
+
+VeraCryptCLI
+| union VeraCryptNewBinary, VeraCryptDriver
+| extend
+    AlertTitle = "VeraCrypt Encryption Tool Activity (Potential Ransomware Impact)",
+    MitreTechnique = "T1486",
+    Severity = case(
+        DetectionVector == "VeraCrypt_CLI_Execution", "Critical",
+        DetectionVector == "VeraCrypt_Dropped_NonStandard_Path", "High",
+        "Medium"
+    )
+| sort by Timestamp desc

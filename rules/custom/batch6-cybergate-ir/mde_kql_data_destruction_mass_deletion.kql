@@ -1,0 +1,60 @@
+// Detection: Mass File Deletion / Data Destruction
+// Technique: T1485 — Data Destruction
+// Platform:  MDE Advanced Hunting | Severity: High
+// Context:   File deletion, manual deletion, destructive cleanup
+// Used by:   Sandworm, Lazarus, APT38, LAPSUS$, Storm-0501
+
+// INVARIANT: Data destruction = high-volume file deletion or use of destructive
+// tools (cipher.exe /w, sdelete, del /s /q, format). MDE DeviceFileEvents
+// captures FileDeleted actions. Burst deletion across critical paths is the signal.
+
+// Query 1: Mass file deletion burst (100+ files in 5 minutes by one process)
+DeviceFileEvents
+| where Timestamp > ago(24h)
+| where ActionType == "FileDeleted"
+// Focus on critical paths (user data, system files, backups)
+| where FolderPath has_any (
+    @"\Users\", @"\Documents\", @"\Desktop\",
+    @"\Shares\", @"\Backup\", @"\Database\",
+    @"\ProgramData\", @"\Program Files\"
+)
+| summarize
+    DeletedFileCount = count(),
+    SampleFiles = make_set(FileName, 10),
+    SamplePaths = make_set(FolderPath, 5),
+    FirstDelete = min(Timestamp),
+    LastDelete = max(Timestamp)
+    by DeviceName, AccountName, InitiatingProcessFileName,
+       InitiatingProcessCommandLine, bin(Timestamp, 5m)
+| where DeletedFileCount >= 100
+| extend
+    DurationSeconds = datetime_diff("second", LastDelete, FirstDelete),
+    AlertTitle = "Mass File Deletion Burst Detected",
+    MitreTechnique = "T1485",
+    Severity = case(
+        DeletedFileCount >= 1000, "Critical",
+        DeletedFileCount >= 500, "High",
+        "Medium"
+    )
+| project
+    FirstDelete, LastDelete, DurationSeconds, DeviceName, AccountName,
+    InitiatingProcessFileName, InitiatingProcessCommandLine,
+    DeletedFileCount, SampleFiles, SamplePaths,
+    AlertTitle, MitreTechnique, Severity
+| sort by DeletedFileCount desc;
+
+// Query 2: Destructive command-line tools execution
+// DeviceProcessEvents
+// | where Timestamp > ago(24h)
+// | where (FileName =~ "cipher.exe" and ProcessCommandLine has "/w:")
+//     or (FileName =~ "sdelete.exe" or FileName =~ "sdelete64.exe")
+//     or (FileName =~ "cmd.exe" and ProcessCommandLine has_any (
+//         "del /s /q", "rd /s /q", "rmdir /s /q", "format /y"
+//     ))
+//     or (FileName =~ "format.com" and ProcessCommandLine has "/y")
+// | where InitiatingProcessFileName !in~ ("MsMpEng.exe", "SenseIR.exe", "TiWorker.exe")
+// | project Timestamp, DeviceName, AccountName, FileName,
+//           ProcessCommandLine, InitiatingProcessFileName,
+//           InitiatingProcessCommandLine, SHA1, ReportId
+// | extend AlertTitle = "Destructive Data Wipe Tool Executed",
+//          MitreTechnique = "T1485", Severity = "Critical"

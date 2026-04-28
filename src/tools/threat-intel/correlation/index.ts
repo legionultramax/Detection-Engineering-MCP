@@ -4,11 +4,10 @@
  * Fuses intelligence from MITRE ATT&CK, vendor blogs, OTX, and the local
  * detection index into coherent, actionable threat intelligence packages.
  *
- * Tools (5):
+ * Tools (4):
  *   ti_multi_source_ttp_lookup — Fan-out across all sources for a technique
  *   ti_actor_full_profile      — Full actor profile fusion (MITRE + OTX + vendors)
  *   ti_hunt_package            — Complete hunt package for client context
- *   ti_report_ingest           — Ingest any threat report URL
  *   ti_daily_brief             — Daily TI brief from recent vendor feeds
  */
 
@@ -30,12 +29,21 @@ import {
   VENDOR_BLOG_TTL,
 } from '../vendors/utils.js';
 import { otxSearchActor } from '../otx.js';
-import { pivotExpandIOCs } from '../pivot.js';
 import { getCached, setCached } from '../cache.js';
 
 // ─── PRIORITY VENDORS ────────────────────────────────────────────────────────
 
 const PRIORITY_VENDORS = ['mandiant', 'microsoft', 'crowdstrike', 'elastic', 'unit42', 'kaspersky'];
+
+// Fallback tier: all remaining VENDOR_ENDPOINTS entries not in PRIORITY_VENDORS.
+// Queried automatically when priority vendors return vendor_reports_found = 0.
+// Eliminates the hard dependency on Playwright for basic vendor coverage.
+const FALLBACK_VENDORS = [
+  'talos', 'eset', 'trendmicro', 'sentinelone', 'symantec',
+  'sophos', 'secureworks', 'checkpoint', 'proofpoint',
+  'trellix', 'fortinet', 'cybereason',
+  'bleeping', 'sans_isc', 'malwarebytes',
+];
 
 // ─── INNER HELPERS ────────────────────────────────────────────────────────────
 
@@ -200,6 +208,20 @@ const tiMultiSourceTTPLookup = defineTool({
       }
     }
 
+    // Tier-2 fallback: when all priority vendors miss, fan out to remaining vendors.
+    // Ensures vendor_reports_found > 0 without requiring Playwright.
+    if (vendorCount === 0) {
+      const fallbackResults = await Promise.allSettled(
+        FALLBACK_VENDORS.map(v => searchVendorFeed(v, techName))
+      );
+      for (const r of fallbackResults) {
+        if (r.status === 'fulfilled' && r.value.length > 0) {
+          recentReports.push(...r.value.slice(0, 2));
+          vendorCount++;
+        }
+      }
+    }
+
     // PHASE 3: FUSE
     const sourcesConsulted = ['mitre_attack', 'local_detection_index', ...PRIORITY_VENDORS.slice(0, vendorCount)];
     const confidence = corrConfidence(sourcesConsulted.length, mitreConfirmed, vendorCount);
@@ -299,6 +321,19 @@ const tiActorFullProfile = defineTool({
       if (r.status === 'fulfilled' && r.value.length > 0) {
         vendorReports.push(...r.value);
         vendorHits++;
+      }
+    }
+
+    // Tier-2 fallback: try remaining vendors when all priority vendors miss.
+    if (vendorHits === 0) {
+      const fallbackResults = await Promise.allSettled(
+        FALLBACK_VENDORS.map(v => searchVendorFeed(v, actor, 3))
+      );
+      for (const r of fallbackResults) {
+        if (r.status === 'fulfilled' && r.value.length > 0) {
+          vendorReports.push(...r.value);
+          vendorHits++;
+        }
       }
     }
 
@@ -492,8 +527,24 @@ const tiHuntPackage = defineTool({
       PRIORITY_VENDORS.map(v => searchVendorFeed(v, `${scenario} ${industry}`, 3))
     );
     const vendorIntel: FeedResult[] = [];
+    let huntVendorHits = 0;
     for (const r of vendorSearches) {
-      if (r.status === 'fulfilled') vendorIntel.push(...r.value);
+      if (r.status === 'fulfilled' && r.value.length > 0) {
+        vendorIntel.push(...r.value);
+        huntVendorHits++;
+      }
+    }
+
+    // Tier-2 fallback: broaden to all remaining vendors when priority tier is empty.
+    if (huntVendorHits === 0) {
+      const fallbackResults = await Promise.allSettled(
+        FALLBACK_VENDORS.map(v => searchVendorFeed(v, `${scenario} ${industry}`, 2))
+      );
+      for (const r of fallbackResults) {
+        if (r.status === 'fulfilled' && r.value.length > 0) {
+          vendorIntel.push(...r.value);
+        }
+      }
     }
 
     // Coverage stats
@@ -540,129 +591,17 @@ const tiHuntPackage = defineTool({
   },
 });
 
-// ─── TOOL 4: ti_report_ingest ─────────────────────────────────────────────────
-
-const tiReportIngest = defineTool({
-  name: 'ti_report_ingest',
-  description:
-    'ELITE: Ingest any threat intelligence report URL. Fetches the report, extracts ALL ' +
-    'intelligence markers (MITRE TTPs, CVEs, IOCs, actors, malware, tools), auto-correlates ' +
-    'extracted techniques with detection coverage, and optionally pivots IOCs through OTX/abuse.ch. ' +
-    'Works with any public threat blog, advisory, or research paper.',
-  inputSchema: {
-    type: 'object',
-    properties: {
-      url:              { type: 'string',  description: 'URL of any threat intelligence report or advisory' },
-      auto_correlate:   { type: 'boolean', description: 'Auto-correlate extracted TTPs with detection index (default: true)' },
-      auto_pivot_iocs:  { type: 'boolean', description: 'Auto-pivot extracted IOCs through OTX/abuse.ch (default: false)' },
-    },
-    required: ['url'],
-  },
-  handler: async (args) => {
-    const { url, auto_correlate = true, auto_pivot_iocs = false } =
-      args as { url: string; auto_correlate?: boolean; auto_pivot_iocs?: boolean };
-    const now = new Date().toISOString();
-
-    // STEP 1: Fetch the report
-    let html: string;
-    try {
-      html = await fetchWithRetry(url);
-    } catch (err) {
-      return {
-        success: false,
-        source:  'ti_report_ingest',
-        url,
-        error:   `Failed to fetch report: ${(err as Error).message}`,
-        queried_at: now,
-      };
-    }
-
-    // STEP 2: Extract article body + intel markers
-    const bodyText = extractArticleBody(html);
-    const markers  = extractIntelMarkers(bodyText);
-
-    // STEP 3: Auto-correlate TTPs with detection index
-    let correlations: Array<{
-      technique_id: string;
-      detection_count: number;
-      gap_status: string;
-    }> | null = null;
-
-    if (auto_correlate && markers.techniques.length > 0) {
-      correlations = markers.techniques.map(tid => {
-        const cov = countDetections(tid);
-        return {
-          technique_id:    tid,
-          detection_count: cov.total,
-          gap_status:      gapStatus(cov.total),
-          by_source:       cov.by_source,
-        };
-      });
-    }
-
-    // STEP 4: IOC pivot (optional)
-    let iocEnrichment: unknown = null;
-    if (auto_pivot_iocs && markers.iocs.length > 0) {
-      try {
-        const pivotableIOCs = markers.iocs
-          .filter(i => ['ip', 'domain', 'hash', 'url'].includes(i.type))
-          .slice(0, 20) as Array<{ type: 'ip' | 'domain' | 'hash' | 'url'; value: string }>;
-        if (pivotableIOCs.length > 0) {
-          iocEnrichment = await pivotExpandIOCs({ iocs: pivotableIOCs });
-        }
-      } catch { /* pivot failed gracefully */ }
-    }
-
-    // Coverage assessment for this report
-    const totalTechniques   = markers.techniques.length;
-    const coveredTechniques = correlations?.filter(c => c.gap_status === 'covered').length ?? 0;
-    const gapTechniques     = correlations?.filter(c => c.gap_status === 'gap').length ?? 0;
-
-    return {
-      success:     true,
-      source:      'ti_report_ingest',
-      url,
-      queried_at:  now,
-      extracted_markers: {
-        techniques:    markers.techniques,
-        cves:          markers.cves,
-        actors:        markers.actors,
-        malware:       markers.malware,
-        tools:         markers.tools,
-        iocs_count:    markers.iocs.length,
-        iocs:          markers.iocs.slice(0, 30),
-        industries:    markers.industries,
-        regions:       markers.regions,
-      },
-      summary: {
-        techniques_found:  totalTechniques,
-        cves_found:        markers.cves.length,
-        actors_found:      markers.actors.length,
-        malware_found:     markers.malware.length,
-        iocs_found:        markers.iocs.length,
-      },
-      ttp_correlation:   correlations,
-      coverage_snapshot: correlations
-        ? {
-            covered:    coveredTechniques,
-            gaps:       gapTechniques,
-            gap_list:   correlations.filter(c => c.gap_status === 'gap').map(c => c.technique_id),
-          }
-        : null,
-      ioc_enrichment: iocEnrichment,
-    };
-  },
-});
 
 // ─── TOOL 5: ti_daily_brief ───────────────────────────────────────────────────
 
 const tiDailyBrief = defineTool({
   name: 'ti_daily_brief',
   description:
-    'Generate a daily threat intelligence brief by scanning recent reports from priority vendors. ' +
+    'Generate a daily threat intelligence brief by scanning recent reports from all 21 vendor and community sources. ' +
     'Automatically extracts MITRE TTPs, CVEs, actors, and malware from each item. ' +
     'Filter by client industries or custom lookback window. ' +
-    'Run this daily to stay current on the threat landscape.',
+    'Run this daily to stay current on the threat landscape. ' +
+    'No Playwright required — all sources are polled directly via RSS.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -673,7 +612,7 @@ const tiDailyBrief = defineTool({
       hours_lookback: { type: 'number', description: 'Hours to look back (default: 24, max: 168)' },
       vendors: {
         type: 'array', items: { type: 'string' },
-        description: 'Specific vendor keys to check (default: top 6 priority vendors)',
+        description: 'Specific vendor keys to check (default: all 21 vendors — priority + fallback tiers)',
       },
     },
   },
@@ -681,7 +620,7 @@ const tiDailyBrief = defineTool({
     const {
       industries = [],
       hours_lookback = 24,
-      vendors = PRIORITY_VENDORS,
+      vendors = [...PRIORITY_VENDORS, ...FALLBACK_VENDORS],
     } = args as { industries?: string[]; hours_lookback?: number; vendors?: string[] };
 
     const now = new Date();
@@ -796,7 +735,6 @@ export const correlationTools: ToolDefinition[] = [
   tiMultiSourceTTPLookup,
   tiActorFullProfile,
   tiHuntPackage,
-  tiReportIngest,
   tiDailyBrief,
 ];
 

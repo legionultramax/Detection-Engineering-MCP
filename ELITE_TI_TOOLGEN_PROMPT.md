@@ -1,6 +1,6 @@
 # ELITE THREAT INTELLIGENCE MCP TOOL GENERATION PROMPT
 
-> **Purpose:** Give this prompt to an AI code generator to produce production-ready MCP tools that crawl, ingest, normalize, and correlate threat intelligence from 70+ sources across 7 tiers — fully integrated into the House of Hunting MCP server.
+> **Purpose:** Give this prompt to an AI code generator to produce production-ready MCP tools that crawl, ingest, normalize, and correlate threat intelligence from 70+ sources across 7 tiers — fully integrated into the Harris HawkEye MCP server.
 >
 > **Self-tested:** This prompt includes validation contracts, test harnesses, and architectural compliance checks.
 
@@ -8,7 +8,7 @@
 
 ## SYSTEM CONTEXT — READ THIS FIRST
 
-You are an elite detection engineer and TypeScript developer building MCP (Model Context Protocol) tools for a threat intelligence platform called **House of Hunting**. This platform is used by MSSP analysts to correlate threat intelligence with MITRE ATT&CK techniques and generate detections.
+You are an elite detection engineer and TypeScript developer building MCP (Model Context Protocol) tools for a threat intelligence platform called **Harris HawkEye**. This platform is used by MSSP analysts to correlate threat intelligence with MITRE ATT&CK techniques and generate detections.
 
 You MUST produce code that integrates into an **existing MCP server** with the architecture described below. Do NOT create a new server. You are adding tools to an existing system.
 
@@ -77,7 +77,7 @@ interface PivotSuggestion {
 //   4. User-Agent header identification
 
 const HEADERS = {
-  'User-Agent': 'HouseOfHunting-MCP/1.0 (ThreatIntel)',
+  'User-Agent': 'HarrisHawkEye-MCP/1.0 (ThreatIntel)',
   'Accept': 'application/json',
 };
 
@@ -1287,7 +1287,7 @@ PHASE 8 — Registration & Testing
 
 ## CRITICAL RULES FOR CODE GENERATION
 
-1. **NEVER create a new MCP server.** You are adding tools to the existing House of Hunting server.
+1. **NEVER create a new MCP server.** You are adding tools to the existing Harris HawkEye server.
 2. **ALWAYS use `defineTool()` from `../registry.js`** — do not create your own tool registration.
 3. **ALWAYS return `IntelResult<T>`** — every tool must follow the response envelope.
 4. **ALWAYS cache results** using `withCache()` from `./cache.js`.

@@ -49,6 +49,12 @@ export function listResources(): { resources: Resource[] } {
         description: 'Summary of knowledge graph contents',
         mimeType: 'application/json',
       },
+      {
+        uri: 'threat-intel://lolfarm',
+        name: 'LOLFarm Database',
+        description: 'Aggregated Living Off The Land intelligence (drivers, DLL hijacks, RMM tools, false positives, WADComs, LOTS domains, MalAPI)',
+        mimeType: 'application/json',
+      },
     ],
   };
 }
@@ -207,7 +213,37 @@ function handleThreatIntelResource(path: string): unknown {
         source: 'CISA KEV',
       };
     }
-    
+
+    case 'lolfarm': {
+      const tables = [
+        ['lolfarm_drivers', 'drivers'],
+        ['lolfarm_hijacklibs', 'hijacklibs'],
+        ['lolfarm_rmm', 'rmm_tools'],
+        ['lolfarm_lofp', 'false_positives'],
+        ['lolfarm_wadcoms', 'wadcoms'],
+        ['lolfarm_lots', 'lots_domains'],
+        ['lolfarm_malapi', 'malapis'],
+      ] as const;
+      const stats: Record<string, number> = {};
+      let total = 0;
+      for (const [table, key] of tables) {
+        try {
+          const result = runQuery<{ count: number }>(`SELECT COUNT(*) as count FROM ${table}`);
+          const count = result[0]?.count || 0;
+          stats[key] = count;
+          total += count;
+        } catch {
+          stats[key] = 0;
+        }
+      }
+      return {
+        total_entries: total,
+        by_source: stats,
+        sources: ['LOLDrivers', 'HijackLibs', 'LOLRMM', 'LoFP', 'WADComs', 'LOTS', 'MalAPI'],
+        reference: 'https://lolol.farm/',
+      };
+    }
+
     default:
       throw new Error(`Unknown threat-intel resource: ${path}`);
   }

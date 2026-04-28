@@ -1,0 +1,54 @@
+title: Impacket Psexec.py RemComSvc Random Executable Execution
+id: f6a7b8c9-1021-4eaf-c021-psexecpy005ff
+status: experimental
+description: >
+  Detects the process-level execution pattern of Impacket's psexec.py on the target host.
+  Psexec.py uploads a RemComSvc binary as a random 8-character mixed-case alpha .exe to
+  C:\Windows\ (e.g., C:\Windows\AbCdEfGh.exe), then creates a service with a random 4-character
+  name to execute it. The combination of services.exe spawning an unknown executable directly
+  from the Windows root directory is the behavioral invariant. Maps to T1021.002 + T1569.002.
+references:
+  - https://attack.mitre.org/techniques/T1021/002/
+  - https://attack.mitre.org/techniques/T1569/002/
+  - https://github.com/fortra/impacket/blob/master/impacket/examples/psexec.py
+  - https://www.youtube.com/watch?v=13cubed
+author: Detection Engineering (Harris HawkEye)
+date: 2026-04-15
+modified: 2026-04-15
+tags:
+  - attack.lateral-movement
+  - attack.t1021.002
+  - attack.execution
+  - attack.t1569.002
+  - tool.impacket
+  - tool.impacket.psexec
+logsource:
+  category: process_creation
+  product: windows
+detection:
+  selection_parent:
+    ParentImage|endswith: '\services.exe'
+  selection_exe_in_windir:
+    # Impacket psexec.py places 8-char alpha .exe directly in C:\Windows\
+    Image|re: '(?i)C:\\Windows\\[a-zA-Z]{8}\.exe$'
+  filter_main_known_windows_exe:
+    # Legitimate executables in C:\Windows\ that are launched by services.exe
+    Image|endswith:
+      - '\services.exe'
+      - '\svchost.exe'
+      - '\lsass.exe'
+      - '\csrss.exe'
+      - '\wininit.exe'
+      - '\spoolsv.exe'
+      - '\winlogon.exe'
+      - '\SearchIndexer.exe'
+      - '\taskhost.exe'
+      - '\taskhostw.exe'
+      - '\SecurityHealthService.exe'
+      - '\MsMpEng.exe'
+      - '\NisSrv.exe'
+  condition: selection_parent and selection_exe_in_windir and not 1 of filter_main_*
+falsepositives:
+  - Third-party software installers that place service executables directly in C:\Windows\ with short random names — very uncommon
+  - Sysinternals PsExec uses PSEXESVC.exe (9 chars) which does not match the 8-char pattern
+level: critical

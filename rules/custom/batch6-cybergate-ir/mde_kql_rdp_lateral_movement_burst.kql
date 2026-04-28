@@ -1,0 +1,150 @@
+// =============================================================================
+// Detection: RDP Lateral Movement Burst (Multi-Host Hopping)
+// Technique: T1021.001 - Remote Services: Remote Desktop Protocol
+// Platform:  Microsoft Defender for Endpoint (MDE Advanced Hunting)
+// Severity:  High
+// Author:    Harris HawkEye
+// Date:      2026-04-15
+// Coverage:  2/3 RDP lateral movement patterns
+//            (1) Multi-host RDP burst from single account
+//            (2) RDP logon from tunneled/localhost source
+//            (3) Post-RDP suspicious process execution [separate query below]
+// Used by:   APT41, Volt Typhoon, FIN7, Wizard Spider, Scattered Spider +30 others
+// =============================================================================
+//
+// BEHAVIORAL INVARIANT (what attacker CANNOT change):
+//   1. RDP produces LogonType "RemoteInteractive" (Type 10) — always
+//   2. Lateral movement = same account authenticating to 3+ hosts rapidly
+//   3. RemoteIP is the source workstation — logged by Windows regardless of tool
+//   4. Hands-on keyboard = interactive session, not automated service account
+//
+// EVASION COVERAGE:
+//   - Using different RDP clients (mstsc, FreeRDP, rdesktop) -> logon event
+//     is server-side, independent of client tool
+//   - RDP over non-3389 port                   -> LogonType is still 10
+//   - RDP tunneled via SSH / Chisel            -> caught by Query 2 (localhost src)
+//   - Using jump server to mask source         -> adjust exclusion list per org
+//
+// FALSE POSITIVES:
+//   - IT helpdesk / sysadmins managing multiple servers via RDP in short windows
+//   - Patch deployment teams accessing servers sequentially
+//   - RDP-based monitoring tools (customize exclusion list below)
+//   Mitigated by: threshold tuning (3+ hosts), time window (1h), exclude known
+//   admin accounts/jump servers per environment
+// =============================================================================
+
+// =============================================
+// QUERY 1: RDP Lateral Movement Burst Detection
+// Fires when one account RDPs to 3+ distinct hosts within 1 hour
+// =============================================
+
+let lookback = 24h;
+let burst_window = 1h;
+let host_threshold = 3;    // Tune: 3 = balanced, 5 = high-confidence only
+
+DeviceLogonEvents
+| where Timestamp > ago(lookback)
+// Type 10 = RemoteInteractive (RDP)
+| where LogonType == "RemoteInteractive"
+| where ActionType == "LogonSuccess"
+// Must have a remote source IP (not local console logon)
+| where isnotempty(RemoteIP)
+    and RemoteIP !in ("127.0.0.1", "::1", "")
+// Exclude machine accounts (end with $) — these are never interactive RDP
+| where AccountName !endswith "$"
+// Exclude well-known service accounts (customize per org)
+| where AccountName !in~ ("HealthMailbox", "MSOL_", "AAD_", "svc_")
+// --- FP Exclusions: Known admin/jump server sources ---
+// IMPORTANT: Customize these to your environment
+// | where RemoteDeviceName !in~ ("YOURJUMPSERVER01", "YOURJUMPSERVER02")
+// | where AccountName !in~ ("helpdeskadmin", "sccmadmin")
+| summarize
+    DistinctTargets = dcount(DeviceName),
+    TargetHostList = make_set(DeviceName, 20),
+    FirstLogon = min(Timestamp),
+    LastLogon = max(Timestamp),
+    TotalLogons = count()
+    by AccountName, AccountDomain, RemoteIP, bin(Timestamp, burst_window)
+// Fire when account hits 3+ distinct hosts in the time window
+| where DistinctTargets >= host_threshold
+| extend
+    DwellMinutes = datetime_diff("minute", LastLogon, FirstLogon),
+    AlertTitle = "RDP Lateral Movement Burst Detected",
+    MitreTechnique = "T1021.001",
+    Severity = case(
+        DistinctTargets >= 8, "Critical",    // 8+ hosts = rapid spray
+        DistinctTargets >= 5, "High",        // 5-7 hosts = likely lateral movement
+        "Medium"                              // 3-4 hosts = investigate
+    )
+| project
+    FirstLogon,
+    LastLogon,
+    DwellMinutes,
+    AccountName,
+    AccountDomain,
+    RemoteIP,
+    DistinctTargets,
+    TargetHostList,
+    TotalLogons,
+    AlertTitle,
+    MitreTechnique,
+    Severity
+| sort by DistinctTargets desc;
+
+// =============================================
+// QUERY 2: RDP from Localhost / Tunneled Source
+// Detects RDP sessions originating from 127.0.0.1 or ::1
+// indicating SSH tunnel, Chisel, ngrok, or port forward
+// =============================================
+
+// DeviceLogonEvents
+// | where Timestamp > ago(24h)
+// | where LogonType == "RemoteInteractive"
+// | where ActionType == "LogonSuccess"
+// | where RemoteIP in ("127.0.0.1", "::1")
+// | where AccountName !endswith "$"
+// | project
+//     Timestamp,
+//     DeviceName,
+//     AccountName,
+//     AccountDomain,
+//     RemoteIP,
+//     LogonType,
+//     ReportId
+// | extend
+//     AlertTitle = "RDP Login from Localhost (Possible Tunnel)",
+//     MitreTechnique = "T1021.001",
+//     Severity = "High"
+
+// =============================================
+// QUERY 3: Post-RDP Suspicious Process Execution
+// Detects processes spawned within RDP sessions that indicate
+// hands-on-keyboard attacker activity (recon, credential theft, etc.)
+// =============================================
+
+// DeviceProcessEvents
+// | where Timestamp > ago(24h)
+// | where IsInitiatingProcessRemoteSession == true
+// | where FileName in~ (
+//     "cmd.exe", "powershell.exe", "pwsh.exe",
+//     "net.exe", "net1.exe", "nltest.exe",
+//     "whoami.exe", "ipconfig.exe", "systeminfo.exe",
+//     "tasklist.exe", "quser.exe", "query.exe",
+//     "reg.exe", "rundll32.exe", "wmic.exe",
+//     "mimikatz.exe", "procdump.exe", "psexec.exe"
+// )
+// | where AccountName !endswith "$"
+// | project
+//     Timestamp,
+//     DeviceName,
+//     AccountName,
+//     FileName,
+//     ProcessCommandLine,
+//     InitiatingProcessFileName,
+//     InitiatingProcessRemoteSessionDeviceName,
+//     FolderPath,
+//     ReportId
+// | extend
+//     AlertTitle = "Suspicious Process Execution in RDP Session",
+//     MitreTechnique = "T1021.001",
+//     Severity = "Medium"

@@ -1,0 +1,51 @@
+title: Impacket Atexec.py Command Execution Pattern
+id: a1b2c3d4-1053-4e5f-9a1b-atexec0001aa
+status: experimental
+description: >
+  Detects the distinctive command-line pattern produced by Impacket's atexec.py on the target host.
+  Atexec creates a scheduled task that runs cmd.exe /C with output redirected to a randomly-named
+  .tmp file in C:\Windows\Temp. The 8-character random alpha temp filename matching the task name
+  is a hardcoded behavioral invariant in atexec.py. Maps to T1053.005 Scheduled Task/Job.
+references:
+  - https://attack.mitre.org/techniques/T1053/005/
+  - https://github.com/fortra/impacket/blob/master/impacket/examples/atexec.py
+  - https://www.youtube.com/watch?v=13cubed
+  - https://threathunt.blog/impacket-part-3/
+author: Detection Engineering (Harris HawkEye)
+date: 2026-04-15
+modified: 2026-04-15
+tags:
+  - attack.execution
+  - attack.t1053.005
+  - attack.lateral-movement
+  - attack.t1021.002
+  - tool.impacket
+  - tool.impacket.atexec
+logsource:
+  category: process_creation
+  product: windows
+detection:
+  selection_parent:
+    ParentImage|endswith: '\svchost.exe'
+  selection_cmd:
+    Image|endswith: '\cmd.exe'
+  selection_pattern:
+    CommandLine|contains|all:
+      - '/C'
+      - 'Windows\Temp\'
+      - '.tmp'
+      - '2>&1'
+  filter_main_wsus:
+    CommandLine|contains:
+      - 'WindowsUpdate'
+      - 'WUAgent'
+      - 'wusa.exe'
+  filter_main_ccm:
+    CommandLine|contains:
+      - 'ccmsetup'
+      - 'Configuration Manager'
+  condition: selection_parent and selection_cmd and selection_pattern and not 1 of filter_main_*
+falsepositives:
+  - Legitimate scheduled tasks redirecting output to temp files — verify task name is random 8-char alpha
+  - SCCM/MECM software deployment scripts that use cmd.exe /C with temp file output
+level: high

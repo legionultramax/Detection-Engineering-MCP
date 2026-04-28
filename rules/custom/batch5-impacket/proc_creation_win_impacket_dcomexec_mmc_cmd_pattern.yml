@@ -1,0 +1,49 @@
+title: Impacket Dcomexec.py MMC DCOM Lateral Movement Pattern
+id: b2c3d4e5-1021-4a3b-8c9d-dcomexec001bb
+status: experimental
+description: >
+  Detects Impacket's dcomexec.py execution on the target host. Dcomexec uses DCOM objects
+  (ShellWindows, ShellBrowserWindow, MMC20) to spawn mmc.exe -Embedding, which then launches
+  cmd.exe /Q /c with output redirected to \\127.0.0.1\ADMIN$\__ followed by the first 5 digits
+  of UNIX epoch time. This parent-child-commandline combination is a high-fidelity invariant.
+  Maps to T1021.003 Distributed Component Object Model.
+references:
+  - https://attack.mitre.org/techniques/T1021/003/
+  - https://github.com/fortra/impacket/blob/master/impacket/examples/dcomexec.py
+  - https://www.youtube.com/watch?v=13cubed
+  - https://threathunt.blog/impacket-part-2/
+author: Detection Engineering (Harris HawkEye)
+date: 2026-04-15
+modified: 2026-04-15
+tags:
+  - attack.lateral-movement
+  - attack.t1021.003
+  - attack.execution
+  - tool.impacket
+  - tool.impacket.dcomexec
+logsource:
+  category: process_creation
+  product: windows
+detection:
+  selection_parent:
+    ParentImage|endswith: '\mmc.exe'
+  selection_cmd:
+    Image|endswith: '\cmd.exe'
+  selection_pattern:
+    CommandLine|contains|all:
+      - '/Q'
+      - '/c'
+      - '\\127.0.0.1\'
+      - '2>&1'
+  filter_main_mmc_legit:
+    # Legitimate MMC snap-in operations do not launch cmd.exe with 127.0.0.1 redirect
+    CommandLine|contains:
+      - 'devmgmt.msc'
+      - 'diskmgmt.msc'
+      - 'compmgmt.msc'
+      - 'services.msc'
+      - 'gpedit.msc'
+  condition: selection_parent and selection_cmd and selection_pattern and not 1 of filter_main_*
+falsepositives:
+  - Extremely unlikely — MMC spawning cmd.exe with loopback ADMIN$ redirect has no legitimate use case
+level: critical

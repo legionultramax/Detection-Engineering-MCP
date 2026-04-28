@@ -1,6 +1,6 @@
 /**
  * Phase 8 — Registration & Testing
- * House of Hunting MCP — Full Validation Suite
+ * Harris HawkEye MCP — Full Validation Suite
  *
  * Test Contracts (per ELITE_TI_TOOLGEN_PROMPT.md):
  *   1  Tool Registration      — every tool has name, description, inputSchema, handler
@@ -80,7 +80,7 @@ function assertWarn(condition, name, detail = '') {
 
 // ─── INITIALIZE DB ────────────────────────────────────────────────────────────
 
-console.log(`\n${BOLD}House of Hunting MCP — Phase 8 Test Suite${RESET}`);
+console.log(`\n${BOLD}Harris HawkEye MCP — Phase 8 Test Suite${RESET}`);
 console.log(`${'─'.repeat(50)}`);
 console.log('Initializing database...');
 

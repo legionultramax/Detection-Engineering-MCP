@@ -45,7 +45,7 @@ export const CVE_FEED_TTL    =  7_200; // 2 hours
 // ─── HTTP ────────────────────────────────────────────────────────────────────
 
 const BASE_HEADERS: Record<string, string> = {
-  'User-Agent': 'HouseOfHunting-MCP/1.0 (ThreatIntel; +https://github.com/house-of-hunting)',
+  'User-Agent': 'HarrisHawkEye-MCP/1.0 (ThreatIntel; +https://github.com/harris-hawkeye)',
   'Accept': 'application/rss+xml, application/atom+xml, text/xml, text/html, */*',
 };
 
@@ -159,6 +159,25 @@ export const VENDOR_ENDPOINTS: Record<string, VendorConfig> = {
     name: 'Elastic Security Labs',
     search: 'https://www.elastic.co/security-labs',
     rss: 'https://www.elastic.co/security-labs/rss/feed.xml',
+  },
+  // ── Community tier (fallback when priority vendors return empty) ────────────
+  bleeping: {
+    key: 'bleeping',
+    name: 'BleepingComputer',
+    search: 'https://www.bleepingcomputer.com/news/security/',
+    rss: 'https://www.bleepingcomputer.com/feed/',
+  },
+  sans_isc: {
+    key: 'sans_isc',
+    name: 'SANS ISC',
+    search: 'https://isc.sans.edu/',
+    rss: 'https://isc.sans.edu/rssfeed.xml',
+  },
+  malwarebytes: {
+    key: 'malwarebytes',
+    name: 'Malwarebytes Labs',
+    search: 'https://www.malwarebytes.com/blog/',
+    rss: 'https://www.malwarebytes.com/blog/feed/',
   },
 };
 

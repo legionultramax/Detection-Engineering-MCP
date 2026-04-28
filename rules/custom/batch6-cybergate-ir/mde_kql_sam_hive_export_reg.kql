@@ -1,0 +1,86 @@
+// =============================================================================
+// Detection: Sensitive Registry Hive Dump via reg.exe (SAM/SYSTEM/SECURITY)
+// Technique: T1003.002 - OS Credential Dumping: Security Account Manager
+// Platform:  Microsoft Defender for Endpoint (MDE Advanced Hunting)
+// Severity:  High
+// Author:    Harris HawkEye
+// Date:      2026-04-15
+// Coverage:  4/4 known reg.exe hive export patterns
+//            (1) reg save hklm\sam  (2) reg export hklm\sam
+//            (3) reg save hklm\system  (4) reg save hklm\security
+// Used by:   APT29, APT41, Wizard Spider, Dragonfly, Ember Bear +8 others
+// =============================================================================
+//
+// BEHAVIORAL INVARIANT (what attacker CANNOT change):
+//   1. reg.exe (or renamed copy) MUST be called with "save" or "export"
+//   2. Target hive path MUST contain sam, system, or security under HKLM
+//   3. These are the ONLY hives containing cached credentials
+//
+// EVASION COVERAGE:
+//   - reg.exe rename             -> ProcessVersionInfoOriginalFileName = "reg.exe"
+//   - Case variation ("SAM")     -> KQL "has" is case-insensitive
+//   - hklm vs hkey_local_machine -> both variants matched
+//   - "save" vs "export"         -> both verbs matched
+//   - Backslash variations       -> "has" tokenizes on path separators
+//
+// FALSE POSITIVES:
+//   - Legitimate DR/backup scripts that export registry hives (rare, usually scheduled)
+//   - Forensic investigators (incident response tooling)
+//   - SCCM hardware inventory (does NOT export SAM/SECURITY, only SYSTEM rarely)
+//   Mitigated by: excluding known backup agents + SYSTEM account with svchost parent
+// =============================================================================
+
+DeviceProcessEvents
+| where Timestamp > ago(24h)
+// Match reg.exe by name OR PE OriginalFileName (catches renamed binary)
+| where FileName =~ "reg.exe"
+    or ProcessVersionInfoOriginalFileName =~ "reg.exe"
+// Must use "save" or "export" verb
+| where ProcessCommandLine has_any ("save", "export")
+// Must target a sensitive hive (SAM, SYSTEM, or SECURITY)
+| where ProcessCommandLine has_any (
+    "\\sam", "\\system", "\\security",
+    "hklm\\sam", "hklm\\system", "hklm\\security",
+    "hkey_local_machine\\sam", "hkey_local_machine\\system", "hkey_local_machine\\security"
+)
+// --- FP Exclusions ---
+// Exclude enterprise backup agents (Veeam, Veritas, Commvault)
+| where InitiatingProcessFileName !in~ (
+    "veeam.backup.service.exe",
+    "BackupExecManagementService.exe",
+    "cvd.exe",
+    "clBackup.exe"
+)
+// Exclude SCCM/MECM agent
+| where InitiatingProcessFileName !in~ ("CCMExec.exe", "CcmExec.exe", "smsexec.exe")
+// Exclude SYSTEM-context svchost (scheduled OS tasks)
+| where not (AccountName =~ "SYSTEM" and InitiatingProcessFileName =~ "svchost.exe")
+// Exclude Defender/MDE internal
+| where InitiatingProcessFileName !in~ ("MsMpEng.exe", "SenseIR.exe")
+// --- Output Projection ---
+| project
+    Timestamp,
+    DeviceName,
+    AccountName,
+    AccountDomain,
+    ProcessCommandLine,
+    FolderPath,
+    ProcessVersionInfoOriginalFileName,
+    InitiatingProcessFileName,
+    InitiatingProcessFolderPath,
+    InitiatingProcessCommandLine,
+    InitiatingProcessParentFileName,
+    SHA1,
+    ProcessId,
+    ReportId
+| extend
+    AlertTitle = "Sensitive Registry Hive Dump (SAM/SYSTEM/SECURITY)",
+    MitreTechnique = "T1003.002",
+    Severity = "High",
+    // Flag which hive was targeted for triage priority
+    TargetedHive = case(
+        ProcessCommandLine has "\\sam", "SAM",
+        ProcessCommandLine has "\\security", "SECURITY",
+        ProcessCommandLine has "\\system", "SYSTEM",
+        "Unknown"
+    )

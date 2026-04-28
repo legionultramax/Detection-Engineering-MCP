@@ -1,0 +1,50 @@
+title: Rapid Network Logon Burst Indicating Impacket Lateral Movement
+id: d0e1f2a3-beef-4ce3-a465-logonburst9dd
+type: threshold
+status: experimental
+description: >
+  Detects a burst of Type 3 (network) logon events with special privilege assignment, characteristic
+  of Impacket lateral movement tools. All five Impacket tools (atexec, dcomexec, smbexec, psexec,
+  wmiexec) generate multiple rounds of 4624 Type 3 + 4672 events in rapid succession on the target
+  host. Atexec and psexec.py generate 2-4 rounds; smbexec generates one per command. A threshold
+  of 4+ Type 3 logons within 1 minute from the same source to the same target is anomalous.
+references:
+  - https://attack.mitre.org/techniques/T1078/
+  - https://attack.mitre.org/techniques/T1021/
+  - https://www.youtube.com/watch?v=13cubed
+author: Detection Engineering (Harris HawkEye)
+date: 2026-04-15
+modified: 2026-04-15
+tags:
+  - attack.lateral-movement
+  - attack.t1021
+  - attack.t1078
+  - tool.impacket
+rules:
+  base_type3_logon:
+    title: Base Type 3 Network Logon Event
+    logsource:
+      product: windows
+      service: security
+    detection:
+      selection:
+        EventID: 4624
+        LogonType: 3
+      filter_machine_accounts:
+        TargetUserName|endswith: '$'
+      filter_loopback:
+        IpAddress:
+          - '127.0.0.1'
+          - '::1'
+      condition: selection and not 1 of filter_*
+group-by:
+  - TargetUserName
+  - WorkstationName
+timespan: 1m
+condition:
+  gte: 4
+falsepositives:
+  - Legitimate file server access bursts (SMB share mounting generates Type 3 logons)
+  - Distributed application health checks using service accounts
+  - SCCM/MECM client check-ins during maintenance windows
+level: medium

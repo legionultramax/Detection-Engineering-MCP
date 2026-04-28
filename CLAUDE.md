@@ -1,421 +1,162 @@
-# CLAUDE.md — House of Hunting MCP · Elite Operations Guide v4
+# Harris HawkEye MCP — Operations Guide v8
 
-> **Project**: House of Hunting MCP
-> **Rule repo**: ~8,000+ detections (Sigma 3,110 · Splunk ESCU 1,966 · Elastic 1,693 · KQL 1,297)
-> **MITRE dataset**: 835 techniques · 187 groups · 787 software · 52 campaigns · 268 mitigations · 20,048 relationships
-> **Reliable Tools**: 45 (API-based, always work)
-> **Web Research**: Playwright + DuckDuckGo (zero cost, JS rendering)
-> **Architecture**: WAT Framework v4 · 12 streamlined blocks
+> **12,769 detections** (KQL 5,051 · Sigma 3,108 · Splunk 1,966 · Elastic 1,689 · Sublime 955)
+> **835 techniques** | **187 groups** | **696 malware** | **52 campaigns** | **268 mitigations**
+> **Primary output = kill-chain correlated queries (KQL + SPL + Sigma), not atomic rules.**
 
 ---
 
-## CORE PRINCIPLE: RELIABLE TOOLS ONLY
+## SKILLS — invoke the matching skill before anything else
 
-**TIER 1 — ALWAYS RELIABLE (Local + Public APIs)**
-```
-MITRE ATT&CK (local)    abuse.ch (URLhaus/ThreatFox/Bazaar)
-Detection Repo (local)   AlienVault OTX
-Knowledge Graph (local)  NVD/EPSS/CISA KEV
-Malpedia                 LOLBAS
-```
+### Security Skills
+| Trigger | Skill |
+|---|---|
+| Write / fix / tune / convert any detection rule | **detect-engineer** |
+| Parse unstructured threat report, blog, DFIR writeup into rules | **threat-report-parser** |
+| Parse CISA / vendor / DFIR advisory for coverage gaps | **advisory-ingest** |
+| Stitch multiple techniques into one correlated query | **killchain-synth** |
+| Pre-deployment: will this rule actually fire? | **detection-validator** |
+| Do I have the telemetry / logs needed for this? | **data-source-mapper** |
+| Generate ATT&CK Navigator layer / heatmap / gap JSON | **navigator-layer-gen** |
+| Generate a coverage report across techniques or actors | **coverage-reporter** |
 
-**TIER 2 — WEB RESEARCH (Playwright + Search)**
-```
-DuckDuckGo search → Get URLs → Playwright renders pages
-Covers: ALL vendor blogs, govt advisories, research reports
-No API keys needed. No rate limits. JS rendering works.
-```
+### Utility Skills
+| Trigger | Skill |
+|---|---|
+| Read, extract, or create any PDF file | **anthropic-skills:pdf** |
+| Read, edit, or create any Word document (.docx) | **anthropic-skills:docx** |
+| Read, edit, or create any spreadsheet (.xlsx / .csv) | **anthropic-skills:xlsx** |
+| Create or edit a PowerPoint presentation (.pptx) | **anthropic-skills:pptx** |
+| Create a new skill or improve an existing one | **anthropic-skills:skill-creator** |
+| Schedule a recurring task or remote agent | **anthropic-skills:schedule** |
+| Configure Claude Code settings / hooks / permissions | **update-config** |
 
-**DEPRECATED — DO NOT USE**
-```
-❌ mandiant_search_reports, microsoft_search_reports, crowdstrike_search_reports
-❌ dfir_report_search_reports, volexity_search_reports, etc.
-❌ ti_report_ingest (403 on most sites)
-→ These are RSS-limited, frequently blocked, unreliable
-→ Use Playwright web search instead
-```
-
----
-
-## WAT FRAMEWORK v4 — Streamlined
-
-### Mode Decision
-
-| Signal | Mode |
-|--------|------|
-| "breach" / "IR" / "compromised" | **Deep** |
-| "full profile" / "comprehensive" / multi-actor | **Deep** |
-| "investigate" / "coverage check" / CVE+detect | **Standard** |
-| Single technique/actor lookup | **Quick** |
-
-### Execution Matrix (12 Blocks)
-
-```
-Block                              | Quick | Standard | Deep
-───────────────────────────────────────────────────────────
-WAT-00  Classify                   |  ✓    |    ✓     |  ✓
-WAT-01  Knowledge Recall           |  ✓    |    ✓     |  ✓
-WAT-10  Actor Intel (MITRE+Malpedia)|  ✓*  |    ✓     |  ✓+
-WAT-11  Technique Intel            |  ✓*   |    ✓     |  ✓+
-WAT-12  CVE Intel                  |  —    |    ✓     |  ✓
-WAT-20  Web Research (Playwright)  |  —    |   ✓†     |  ✓
-WAT-21  IOC Enrichment             |  —    |   ✓‡     |  ✓
-WAT-30  Coverage Audit             |  ✓    |    ✓     |  ✓
-WAT-31  Gap Analysis               |  ✓    |    ✓     |  ✓
-WAT-40  Query Construction         |  ✓    |    ✓     |  ✓
-WAT-41  Query Validation           |  ✓    |    ✓     |  ✓
-WAT-50  Knowledge Persist + Report |  ✓    |    ✓     |  ✓
-```
-
-`* fused call only` `+ granular supplement` `† if URL provided` `‡ if IOCs exist`
+> If no skill matches, fall through to the WAT pipeline below.
 
 ---
 
-## WAT BLOCKS — STREAMLINED
+## MODE
 
-### WAT-00: CLASSIFY
-```
-1. Classify mode (Quick/Standard/Deep)
-2. Resolve actor aliases: search_threat_groups(name) → get canonical + aliases
-3. Check Playwright: browser_snapshot() → cache result
-```
-
-### WAT-01: KNOWLEDGE RECALL
-```
-1. search_entities(actor_aliases)     [check KG for existing data]
-2. get_learnings(topic)               [past insights]
-3. get_decisions(topic)               [past design choices]
-→ FULL HIT (< 72h): skip WAT-10/11/20/21
-→ PARTIAL/MISS: continue
-```
-
-### WAT-10: ACTOR INTELLIGENCE
-```
-FUSED (all modes):
-  get_threat_group(actor)              [MITRE techniques, aliases]
-  malpedia_actor_profile(actor_id)     [malware families, alt names]
-
-GRANULAR (Deep only):
-  get_software(each_malware)           [technique links per tool]
-  list_campaigns(actor)                [campaign history]
-  get_data_sources(each_technique)     [required telemetry]
-  get_mitigations(each_technique)      [defensive controls]
-```
-
-### WAT-11: TECHNIQUE INTELLIGENCE
-```
-lookup_mitre_technique(tid)            [full description]
-get_groups_using_technique(tid)        [who uses this]
-get_software_using_technique(tid)      [what implements this]
-get_data_sources(tid)                  [how to detect]
-get_mitigations(tid)                   [how to prevent]
-```
-
-### WAT-12: CVE INTELLIGENCE
-```
-[PARALLEL]:
-  nvd_cve_lookup(cve_id)               [CVSS, description, CPE]
-  epss_score_lookup(cve_id)            [exploitation probability]
-  check_cisa_kev(cve_id)               [KEV status + deadline]
-
-cve_to_detection(cve_id)               [generate detection rules]
-```
-
-### WAT-20: WEB RESEARCH (Playwright)
-**THIS REPLACES ALL UNRELIABLE VENDOR TOOLS**
-
-```
-STEP 1: Search
-  browser_navigate("https://duckduckgo.com")
-  browser_type("site:microsoft.com APT29 techniques")
-  browser_click("search button")
-  browser_snapshot() → extract URLs
-
-STEP 2: Render & Extract
-  For each relevant URL:
-    browser_navigate(url)
-    browser_wait_for(time=3)
-    browser_snapshot() → extract:
-      - Technique IDs (T1XXX pattern)
-      - CVE IDs
-      - IOCs (IPs, domains, hashes)
-      - Actor names
-      - Malware families
-```
-
-**Search Queries by Context:**
-```
-Actor research:    "site:microsoft.com OR site:mandiant.com {actor} techniques"
-CVE research:      "{CVE-ID} exploitation detection"
-Malware research:  "site:malpedia.caad.fkie.fraunhofer.de {malware}"
-Govt advisories:   "site:cisa.gov {actor OR CVE}"
-```
-
-### WAT-21: IOC ENRICHMENT
-```
-[MANDATORY FIRST]: misp_warninglist_check(ioc)  [FP filter]
-
-[PARALLEL]:
-  threatfox_search_ioc(ioc)            [ThreatFox C2 data]
-  bazaar_lookup_hash(hash)             [sample analysis]
-  otx_pivot_ip/domain/hash(ioc)        [OTX enrichment]
-  urlhaus_lookup_url(url)              [malicious URL check]
-
-[HIGH VALUE]:
-  bazaar_get_imphash_siblings(imphash) [find variants]
-```
-
-### WAT-30: COVERAGE AUDIT
-```
-Per technique:
-  list_by_mitre(parent_tid)            [parent coverage]
-  list_by_mitre(sub_tid)               [sub-technique coverage]
-  search_detections(actor_name)        [name-tagged rules]
-  search_detections(malware_name)      [malware-tagged rules]
-
-Classify: COVERED / PARTIAL / GAP
-```
-
-### WAT-31: GAP ANALYSIS
-```
-identify_gaps(threat_profile)          [find missing coverage]
-analyze_coverage(source)               [heatmap view]
-
-Prioritize gaps:
-  CRITICAL: actor uses + active campaign + no rule
-  HIGH: actor uses + no rule
-  MEDIUM: related actor uses + no rule
-  LOW: theoretical gap
-```
-
-### WAT-40: QUERY CONSTRUCTION
-```
-1. search_detections(technique)        [find adaptable rule]
-2. get_detection(rule_id)              [get full content]
-3. If CVE: cve_to_detection(cve_id)
-4. If YARA: convert_yara_to_sigma(yara)
-5. convert_sigma_to_kql(sigma)         [for Sentinel]
-6. lookup_lolbas(binary)               [find alternatives]
-
-Output: Sigma + KQL + Splunk SPL per gap
-```
-
-### WAT-41: QUERY VALIDATION (5 Dimensions)
-```
-| Dimension | Check | Min Score |
-|-----------|-------|----------|
-| Evasion   | Covers obfuscation, alt binaries, case variation | 3/5 |
-| Fields    | Uses correct log fields + corroborating fields | 3/5 |
-| Paths     | Covers multiple execution paths | 3/5 |
-| FP        | Has filter section + documented FP sources | 3/5 |
-| Conversion| KQL logic matches Sigma exactly | 3/5 |
-
-Composite ≥ 3.0 = PASS
-Composite < 3.0 = Iterate (max 2x) or flag [HARDENING: PARTIAL]
-```
-
-### WAT-50: PERSIST + REPORT
-```
-[PARALLEL]:
-  create_entity(actor/technique/campaign)
-  create_relation(actor, technique, "uses")
-  add_learning(topic, insight, source)
-  log_decision(title, reasoning, alternatives)
-
-Generate final report (see template below)
-```
+| Trigger | Mode |
+|---|---|
+| "breach" / "IR" / "compromised" / "full profile" / "comprehensive" | **Deep** |
+| "investigate" / "coverage check" / CVE + detect / specific hunt | **Standard** |
+| Single technique or actor lookup | **Quick** |
 
 ---
 
-## ORCHESTRATION WORKFLOWS
+## TOOL TIERS
 
-### HUNT-ACTOR (e.g., "Hunt APT29")
-```
-WAT-00 → WAT-01 → WAT-10 → WAT-20(Deep) → WAT-21 → WAT-30 → WAT-31 → WAT-40 → WAT-41 → WAT-50
-```
+### Tier 1 — RELIABLE (always use first)
 
-### HUNT-TECHNIQUE (e.g., "Hunt T1059.001")
-```
-WAT-00 → WAT-01 → WAT-11 → WAT-20(if URL) → WAT-30 → WAT-31 → WAT-40 → WAT-41 → WAT-50
-```
+| Category | Tools |
+|---|---|
+| **MITRE ATT&CK** | get_threat_group, search_threat_groups, get_software, search_software, lookup_mitre_technique, search_mitre_techniques, get_groups_using_technique, get_software_using_technique, get_mitigations, get_data_sources, list_campaigns, list_data_sources, get_mitre_attack_stats |
+| **Detection Repo** | search_detections, get_detection, list_by_mitre, list_by_severity, analyze_coverage, identify_gaps, get_stats |
+| **Correlation Engine** | ti_multi_source_ttp_lookup, ti_actor_full_profile, ti_hunt_package, ti_daily_brief *(auto-fallbacks to 15 secondary vendors — only trigger Playwright if vendor_reports_found = 0)* |
+| **Abuse.ch** | urlhaus_lookup_url/host/tag, threatfox_search_ioc/family/tag, threatfox_get_recent_iocs, bazaar_lookup_hash, bazaar_search_family/tag, bazaar_get_recent_samples, bazaar_get_imphash_siblings |
+| **OTX** | otx_pivot_ip/domain/hash/url, otx_search_actor, otx_get_pulse_iocs, otx_subscribed_feed |
+| **Vuln Intel** | nvd_cve_lookup, epss_score_lookup, epss_bulk_check, check_cisa_kev |
+| **Malware Research** | malpedia_search, malpedia_actor_profile, malpedia_family_profile, anyrun_trending |
+| **LOL / IOC** | lookup_lolbas, list_lolbas, analyze_ioc, misp_warninglist_check |
+| **LOLFarm** | **get_lolfarm_context** *(call with `mode="summary"` first — ~500 tokens; escalate to `detailed` only if authoring depends on full data)*, then per-source deep-dives: lookup_loldriver, lookup_hijacklib, lookup_lolrmm, lookup_lofp, lookup_wadcom, lookup_lots_domain, lookup_malapi, search_lolfarm, list_loldrivers, list_lolrmm, list_hijacklibs. **sync_lolfarm** runs weekly via scheduled task — do not call manually unless data is suspected stale. |
+| **Rule Conversion** *(drafts only — always refine)* | cve_to_detection, convert_yara_to_sigma, convert_sigma_to_kql |
+| **Knowledge Graph** | create_entity, search_entities, create_relation, get_knowledge_summary, log_decision, get_decisions, add_learning, get_learnings |
 
-### ANALYZE-CVE (e.g., "Detect CVE-2024-XXXX")
-```
-WAT-00 → WAT-01 → WAT-12 → WAT-20(if needed) → WAT-30 → WAT-31 → WAT-40 → WAT-41 → WAT-50
-```
+### Tier 2 — WEB RESEARCH (Playwright + DuckDuckGo)
+Trigger only when correlation engine returns `vendor_reports_found = 0` after full fallback, or when you need content not available via RSS (PoC code, paywalled reports, campaigns < 4h old).
 
-### INGEST-ADVISORY (e.g., "Read this CISA advisory")
-```
-WAT-00 → WAT-20(Playwright URL) → Extract TTPs/IOCs → WAT-21 → WAT-30 → WAT-40 → WAT-41 → WAT-50
-```
+**Sequence:** `browser_navigate(duckduckgo)` → type query → click search → snapshot → for each result: navigate → wait(3s) → snapshot → extract T-IDs, CVEs, IOCs, CLI patterns, event IDs, inline queries.
 
-### DAILY-BRIEF (e.g., "What's trending?")
-```
-WAT-00 → anyrun_trending → threatfox_get_recent_iocs → bazaar_get_recent_samples → WAT-50(brief)
-```
+**Search patterns:**
+- Actor TTPs: `site:microsoft.com OR site:mandiant.com {actor} techniques 2024`
+- CVE exploit: `{CVE-ID} exploitation detection site:attackerkb.com OR site:rapid7.com`
+- Technique artifacts: `site:ired.team OR site:threathunterplaybook.com {T-ID} artifacts`
+- SPL rules: `site:research.splunk.com {query} detection`
+- KQL rules: `site:elastic.co/security-labs {query}`
+- Govt advisories: `site:cisa.gov {actor OR CVE}`
 
----
-
-## TOOL REFERENCE — RELIABLE ONLY
-
-### MITRE ATT&CK (Local — Always Works)
-```
-get_threat_group(name)                 search_threat_groups(query)
-get_software(name)                     search_software(query)
-lookup_mitre_technique(tid)            search_mitre_techniques(query)
-get_groups_using_technique(tid)        get_software_using_technique(tid)
-get_mitigations(tid)                   get_data_sources(tid)
-list_campaigns(query)                  get_mitre_attack_stats()
-list_data_sources()
-```
-
-### Detection Repo (Local — ~8,000 Rules)
-```
-search_detections(query)               get_detection(id)
-list_by_mitre(tid)                     list_by_severity(level)
-analyze_coverage(source)               identify_gaps(profile)
-get_stats()
-```
-
-### abuse.ch (Public API — No Auth)
-```
-urlhaus_lookup_url(url)                urlhaus_lookup_host(host)
-urlhaus_lookup_tag(tag)
-threatfox_search_ioc(ioc)              threatfox_search_family(family)
-threatfox_search_tag(tag)              threatfox_get_recent_iocs()
-bazaar_lookup_hash(hash)               bazaar_search_family(family)
-bazaar_search_tag(tag)                 bazaar_get_recent_samples()
-bazaar_get_imphash_siblings(imphash)
-```
-
-### AlienVault OTX (Requires OTX_API_KEY)
-```
-otx_pivot_ip(ip)                       otx_pivot_domain(domain)
-otx_pivot_hash(hash)                   otx_pivot_url(url)
-otx_search_actor(actor)                otx_get_pulse_iocs(pulse_id)
-otx_subscribed_feed()
-```
-
-### Vulnerability Intel (Public APIs)
-```
-nvd_cve_lookup(cve_id)                 epss_score_lookup(cve_id)
-epss_bulk_check(cve_ids)               check_cisa_kev(cve_id)
-```
-
-### Malware Research (Public)
-```
-malpedia_search(query)                 malpedia_actor_profile(actor_id)
-malpedia_family_profile(family_id)     anyrun_trending()
-```
-
-### LOLBAS & IOC Analysis
-```
-lookup_lolbas(binary)                  list_lolbas()
-analyze_ioc(ioc)                       misp_warninglist_check(ioc)
-```
-
-### Rule Conversion
-```
-cve_to_detection(cve_id)               convert_yara_to_sigma(yara)
-convert_sigma_to_kql(sigma)            [validate output!]
-```
-
-### Knowledge Graph (Local)
-```
-create_entity(type, name, props)       search_entities(query)
-create_relation(source, target, type)  get_knowledge_summary()
-log_decision(title, decision, reason)  get_decisions(topic)
-add_learning(topic, insight, source)   get_learnings(topic)
-```
-
-### Playwright (Web Research)
-```
-browser_navigate(url)                  browser_snapshot()
-browser_click(selector)                browser_type(text)
-browser_wait_for(time=N)               browser_take_screenshot()
-browser_evaluate(js)                   browser_tabs()
-```
+### BANNED — never use
+`*_search_reports`, `*_fetch_report`, `ti_report_ingest` — all deprecated. Use Playwright instead.
 
 ---
 
-## REPORT TEMPLATE
+## WAT PIPELINE
 
-```markdown
-## Threat Hunt Report — [Actor/Technique/CVE]
-**Date**: [date] | **Mode**: [Quick/Standard/Deep] | **Priority**: [Critical/High/Medium]
+**WAT-00 Classify** — Determine mode. Resolve actor aliases via search_threat_groups(). Check browser state.
+**WAT-01 Recall** — search_entities + get_learnings + get_decisions. Full hit (<72h) = skip WAT-10/11/20/21.
+**WAT-10 Actor Intel** — get_threat_group + malpedia_actor_profile + ti_actor_full_profile → extract ordered_ttp_chain, malware_artifacts, dwell_time. Empty vendor data → WAT-20. Deep: add get_software, list_campaigns, get_mitigations per technique.
+**WAT-11 Technique Intel** — lookup_mitre_technique + get_groups_using_technique + get_software_using_technique + get_data_sources + get_mitigations + ti_multi_source_ttp_lookup. vendor_reports_found=0 → WAT-20.
+**WAT-12 CVE Intel** *(Standard/Deep)* — nvd_cve_lookup + epss_score_lookup + check_cisa_kev in parallel. Playwright mandatory when CVSS ≥ 8.0 or KEV = yes.
+**WAT-20 Web Research** *(Standard/Deep)* — Playwright + DuckDuckGo per Tier 2 sequence. Always run when correlation engine returned empty.
+**WAT-21 IOC Enrichment** — misp_warninglist_check FIRST. Then threatfox + bazaar + otx_pivot + urlhaus in parallel. High-value: bazaar_get_imphash_siblings.
+**WAT-30 Coverage Audit** — list_by_mitre(parent + sub) + search_detections per technique. Classify: COVERED / PARTIAL / GAP.
+**WAT-31 Gap Analysis** — identify_gaps() as baseline only. Manual per-TID check via list_by_mitre. Generic rules = PARTIAL. Priority: CRITICAL > HIGH > MEDIUM > LOW.
+**WAT-40 Query Reference** — Collect best existing rules via search_detections + get_detection + lookup_lolbas. Input for WAT-42, not the deliverable.
+**WAT-41 Validation** — Score every rule: 5 dimensions (Evasion, Fields, Paths, FP, Syntax) + 3 for correlation (Sequence, Entity, Window). Composite < 3.0 = iterate max 2x then flag [HARDENING: PARTIAL].
+**WAT-42 Kill-Chain Synthesis** *(PRIMARY — Standard/Deep)* — invoke **killchain-synth** skill with ordered_ttp_chain + reference rules from WAT-40.
+**WAT-50 Persist + Report** — create_entity, create_relation, add_learning, log_decision in parallel. Generate report.
 
-### Executive Summary
-2-3 sentences: what, who, why it matters.
-
-### MITRE Coverage
-| Technique | Groups | Software | Data Source | Coverage |
-|-----------|--------|----------|-------------|----------|
-| T1XXX.XXX | [actors] | [tools] | [logs] | ✅/⚠️/❌ |
-
-### Intelligence
-- **IOCs**: [IPs, domains, hashes]
-- **Campaigns**: [names, dates]
-- **EPSS**: [score] | **KEV**: [yes/no]
-
-### Detection Gaps
-| Gap | Priority | Action | Log Required |
-|-----|----------|--------|-------------|
-| T1XXX | CRITICAL | BUILD_RULE | Sysmon EID 1 |
-
-### Detection Rules
-**Sigma**: [yaml block]
-**KQL**: [query] — Score: X.X/5.0
-**SPL**: [query]
-
-### Recommended Actions
-1. Deploy: [rules]
-2. Acquire: [missing logs]
-3. Mitigate: [MITRE mitigations]
-```
+### Shortcuts
+| Shortcut | Steps |
+|---|---|
+| **HUNT-ACTOR** | WAT-00→01→10→20→21→30→31→40→41→42→50 |
+| **HUNT-TECHNIQUE** | WAT-00→01→11→20→30→31→40→41→42(if chain)→50 |
+| **ANALYZE-CVE** | WAT-00→01→12→20→30→31→40→41→42→50 |
+| **INGEST-ADVISORY** | → invoke **advisory-ingest** skill directly |
+| **DAILY-BRIEF** | anyrun_trending + threatfox_get_recent_iocs + bazaar_get_recent_samples → Playwright → WAT-50 |
 
 ---
 
-## ACTOR NAMING CONVENTION
+## REPORT STRUCTURE
 
-| MITRE | CrowdStrike | Microsoft | Malpedia |
-|-------|-------------|-----------|----------|
-| APT29 | Cozy Bear | Midnight Blizzard | apt.apt29 |
-| APT28 | Fancy Bear | Forest Blizzard | apt.apt28 |
-| Lazarus | Hidden Cobra | Diamond Sleet | apt.lazarus_group |
-| MuddyWater | Static Kitten | Mango Sandstorm | apt.muddywater |
-| FIN7 | Carbon Spider | Sangria Tempest | crime.fin7 |
+```
+## Threat Hunt Report — [Subject]
+**Date** | **Mode** (Quick/Standard/Deep) | **Priority** (Critical/High/Medium)
 
-**Always resolve first**: `search_threat_groups(alias)` → canonical name
+### Executive Summary — 2-3 sentences: what, who, why now.
+### MITRE Kill-Chain Coverage — Table: Phase | Technique | Groups | Data Source | Coverage
+### Intelligence Sources — Playwright sites, IOCs, campaigns, EPSS/KEV scores
+### Detection Gaps — Table: TID | Phase | Priority | Log Required | Why Critical
+### Abuse Matrix — Pattern | T-ID | CLI | Actors | Coverage (all known patterns)
+### Atomic Detection Rules — Sigma + KQL + SPL per gap technique, with validation scores
+### Kill-Chain Correlation (PRIMARY) — Sigma correlation + KQL let-join + SPL phase-scored
+### Kill-Chain Score — X.X/5.0 | Phases covered | FP risk level
+### Data Requirements — Table: Phase | Log Source | Event ID | Platform | Collection Status
+### Recommended Actions — Deploy order, missing telemetry, MITRE mitigations, KG entities persisted
+```
 
 ---
 
 ## QUALITY GATES
 
-**BLOCKING (must complete before report)**
-- [ ] Gap analysis completed (WAT-31)
-- [ ] Every rule scores ≥ 3/5 on all dimensions (WAT-41)
-- [ ] EPSS + KEV checked for any CVE
+**Blocking — must complete before report:**
+- Gap analysis per TID in kill chain (WAT-31) — not just identify_gaps()
+- WAT-42 kill-chain synthesis attempted for Standard/Deep
+- Every atomic rule scores ≥ 3/5 on all 5 dimensions
+- Kill-chain query scores ≥ 3/5 on Sequence + Entity + Window
+- Playwright run if any vendor data returned empty
+- EPSS + KEV checked for any CVE
+- Binary-scoped rules: abuse matrix covering ALL known patterns before writing query
 
-**NON-BLOCKING (best effort)**
-- [ ] MISP warninglist checked for domain/IP IOCs
-- [ ] Data source requirements stated
-- [ ] FP considerations documented
-- [ ] New findings persisted to KG
+**Non-blocking — best effort:**
+- MISP warninglist checked for domain/IP IOCs before pivoting
+- Data source requirements stated per phase
+- FP considerations documented per phase (not global)
+- New findings persisted to Knowledge Graph
 
 ---
 
 ## ANTI-PATTERNS — NEVER DO
 
-```
-❌ Use mandiant_search_reports as primary research method
-❌ Use ti_report_ingest on vendor blogs (403 errors)
-❌ Call multiple vendor _search_reports sequentially
-❌ Skip misp_warninglist_check before IOC pivoting
-❌ Hardcode IOCs in detection rules
-❌ Deploy rules with < 3.0 composite score
-❌ Retry 403 URLs with same tool
-```
-
----
-
-*House of Hunting MCP · WAT Framework v4 · ~8,000 detections · 835 techniques · 187 groups · 45 reliable tools*
+- Use `*_search_reports`, `*_fetch_report`, or `ti_report_ingest` (deprecated)
+- Present a single atomic rule as final output for Standard/Deep hunts
+- Stop at WAT-40 without WAT-42 synthesis in Standard/Deep mode
+- Accept empty vendor_reports without Playwright supplement
+- Skip misp_warninglist_check before IOC pivoting
+- Hardcode IOC values inside detection rule logic
+- Deploy rules with composite score < 3.0
+- Use identify_gaps() alone for actor-specific hunts (too generic)
+- Present cve_to_detection() or convert_yara_to_sigma() output as final (both are drafts)
+- Write binary-scoped detection without enumerating all known abuse patterns first
+- Call MCP tools (search_detections, list_by_mitre, etc.) via subagent — always call directly in parallel

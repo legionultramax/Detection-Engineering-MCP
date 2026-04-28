@@ -1,0 +1,45 @@
+// Detection: Scheduled Task Creation for Wiper/Destructive Payload
+// Technique: T1053.005 — Scheduled Task/Job: Scheduled Task
+// Platform:  MDE Advanced Hunting | Severity: High
+// Context:   Handala wiper launched as a scheduled task
+
+// INVARIANT: schtasks.exe /create with suspicious action path (temp dirs, public,
+// appdata, random names) + SYSTEM privileges = wiper staging pattern.
+// Legitimate scheduled tasks come from SCCM, Windows Update, or known software installers.
+
+DeviceProcessEvents
+| where Timestamp > ago(24h)
+| where FileName =~ "schtasks.exe"
+    or ProcessVersionInfoOriginalFileName =~ "schtasks.exe"
+| where ProcessCommandLine has "/create" or ProcessCommandLine has "-create"
+// Suspicious payload indicators in the task action
+| where ProcessCommandLine has_any (
+    // Suspicious paths
+    @"\Temp\", @"\tmp\", @"\ProgramData\", @"\AppData\",
+    @"\Public\", @"\Downloads\", @"C:\Users\",
+    // Destructive/wiper keywords
+    "wipe", "destroy", "format", "clean", "erase", "handala",
+    // Scripting engines as task actions (common wiper delivery)
+    "powershell", "cmd.exe /c", "cscript", "wscript", "mshta"
+)
+// Exclude SCCM, Windows Update, Defender
+| where InitiatingProcessFileName !in~ (
+    "CCMExec.exe", "CcmExec.exe", "smsexec.exe",
+    "MsMpEng.exe", "SenseIR.exe", "TiWorker.exe",
+    "MpCmdRun.exe", "SetupHost.exe"
+)
+// Exclude machine accounts creating scheduled OS maintenance tasks
+| where not (AccountName endswith "$" and InitiatingProcessFileName =~ "svchost.exe")
+| project
+    Timestamp, DeviceName, AccountName, AccountDomain,
+    ProcessCommandLine, FolderPath, ProcessVersionInfoOriginalFileName,
+    InitiatingProcessFileName, InitiatingProcessCommandLine,
+    InitiatingProcessParentFileName, SHA1, ReportId
+| extend
+    AlertTitle = "Suspicious Scheduled Task Created (Potential Wiper Staging)",
+    MitreTechnique = "T1053.005",
+    Severity = case(
+        ProcessCommandLine has_any ("wipe", "destroy", "format", "handala"), "Critical",
+        ProcessCommandLine has_any ("SYSTEM", "/ru SYSTEM", "/rl HIGHEST"), "High",
+        "Medium"
+    )
