@@ -2,15 +2,15 @@
 
 **Detection Engineering Command Center for Claude Code**
 
-A Model Context Protocol (MCP) server purpose-built for detection engineers. Indexes 11,800+ detection rules from four major SIEM ecosystems, enriches them with MITRE ATT&CK v18.1, Atomic Red Team, LOLBAS, LOLFarm (lolol.farm), and 15+ threat intelligence sources — then exposes everything through 57 reliable tools and 7 Claude Code skills that implement the full detection engineering lifecycle.
+A Model Context Protocol (MCP) server purpose-built for detection engineers. Indexes 12,800+ detection rules from five major detection ecosystems (Sigma, KQL/Sentinel, Splunk ESCU, Elastic, Sublime), enriches them with MITRE ATT&CK v18.1, Atomic Red Team, LOLBAS, LOLFarm (lolol.farm), and 15+ threat intelligence sources — then exposes everything through 122 tools and 8 Claude Code skills that implement the full detection engineering lifecycle.
 
 The primary output is **kill-chain correlated queries** (KQL + SPL + Sigma), not isolated atomic rules.
 
-![Tools](https://img.shields.io/badge/Tools-57_reliable-blue)
-![Skills](https://img.shields.io/badge/Skills-7-green)
-![Detections](https://img.shields.io/badge/Detections-11%2C814-orange)
+![Tools](https://img.shields.io/badge/Tools-122-blue)
+![Skills](https://img.shields.io/badge/Skills-8-green)
+![Detections](https://img.shields.io/badge/Detections-12%2C810-orange)
 ![MITRE](https://img.shields.io/badge/MITRE_ATT%26CK-v18.1-red)
-![Techniques](https://img.shields.io/badge/Technique_Coverage-606%2F835_(72.6%25)-brightgreen)
+![Techniques](https://img.shields.io/badge/Technique_Coverage-602%2F835_(72.1%25)-brightgreen)
 ![ART](https://img.shields.io/badge/Atomic_Red_Team-1770_tests-yellow)
 ![TI Sources](https://img.shields.io/badge/TI_Sources-15+-purple)
 ![LOLFarm](https://img.shields.io/badge/LOLFarm-7_sources-ff69b4)
@@ -21,7 +21,7 @@ The primary output is **kill-chain correlated queries** (KQL + SPL + Sigma), not
 
 | Capability | Description |
 |---|---|
-| **Multi-source detection search** | Query 11,800+ Sigma, Splunk ESCU, Elastic, and KQL rules from one interface with FTS5 full-text search |
+| **Multi-source detection search** | Query 12,810 rules (KQL 5,051 · Sigma 3,108 · Splunk ESCU 1,966 · Elastic 1,689 · Sublime 996) from one interface |
 | **MITRE ATT&CK enrichment** | 835 techniques, 187 groups, 787 software, 52 campaigns, 20,048 relationships — all local, all queryable |
 | **Atomic Red Team validation** | 1,770 adversary simulation tests cross-referenced against your detection rules for coverage gaps |
 | **LOLFarm intelligence** | Aggregated Living-Off-The-Land data from 7 sources: LOLDrivers, HijackLibs, LOLRMM, LoFP, WADComs, LOTS, MalAPI |
@@ -38,11 +38,11 @@ The primary output is **kill-chain correlated queries** (KQL + SPL + Sigma), not
 
 ```
                     ┌─────────────────────────────────────────┐
-                    │          Claude Code + 7 Skills          │
-                    │  advisory-ingest → data-source-mapper    │
-                    │  → detect-engineer → detection-validator │
-                    │  → killchain-synth → coverage-reporter   │
-                    │  → navigator-layer-gen                   │
+                    │          Claude Code + 8 Skills          │
+                    │  advisory-ingest / threat-report-parser  │
+                    │  → data-source-mapper → detect-engineer  │
+                    │  → detection-validator → killchain-synth │
+                    │  → coverage-reporter → navigator-layer-gen│
                     └──────────────────┬──────────────────────┘
                                        │ MCP Protocol
                     ┌──────────────────▼──────────────────────┐
@@ -58,14 +58,14 @@ The primary output is **kill-chain correlated queries** (KQL + SPL + Sigma), not
                     │  └─────────┘ └──────────┘ └───────────┘ │
                     │  ┌─────────┐ ┌──────────┐ ┌───────────┐ │
                     │  │Knowledge│ │Sublime   │ │ Report    │ │
-                    │  │Graph (8)│ │Security  │ │Generator  │ │
+                    │  │Graph (8)│ │Security(4)│ │Generator(1)│ │
                     │  └─────────┘ └──────────┘ └───────────┘ │
                     └──────────────────┬──────────────────────┘
                                        │
                     ┌──────────────────▼──────────────────────┐
                     │     SQLite (sql.js WASM) — 97 MB DB      │
                     │                                          │
-                    │  11,814 detections │ 835 techniques       │
+                    │  12,810 detections │ 835 techniques       │
                     │  1,770 ART tests   │ 138 telemetry maps   │
                     │  LOLFarm 7 tables  │ Knowledge graph      │
                     └─────────────────────────────────────────┘
@@ -150,17 +150,20 @@ Restart Claude Desktop after configuration. First launch auto-indexes all rules 
 
 ## Detection Engineering Skills
 
-Seven Claude Code skills implement the full detection engineering lifecycle. Each skill is a self-contained workflow that calls MCP tools — nothing is hallucinated from training data.
+Eight Claude Code skills implement the full detection engineering lifecycle. Each skill is a self-contained workflow that calls MCP tools — nothing is hallucinated from training data.
 
 ```
-Advisory / Threat Report
+Advisory / Threat Report / Vendor Blog / DFIR Writeup
         │
-        ▼
-┌────────────────────┐
-│   advisory-ingest  │  Extract T-IDs, CVEs, IOCs → prioritized gap table
-└────────────────────┘
-        │
-        ▼
+        ├──────────────────────────┐
+        ▼                          ▼
+┌────────────────────┐  ┌────────────────────┐
+│   advisory-ingest  │  │threat-report-parser│  Parse unstructured intel →
+│  CISA/vendor → gap │  │  scored rules out  │  scored deployment-ready rules
+└────────────────────┘  └────────────────────┘
+        │                          │
+        └──────────────┬───────────┘
+                       ▼
 ┌────────────────────┐
 │  data-source-mapper│  Confirm: do we have the telemetry to detect this?
 └────────────────────┘
@@ -198,6 +201,7 @@ Advisory / Threat Report
 |---|---|---|
 | **detect-engineer** | Writes production-ready Sigma, KQL, SPL, ESCU YAML, or Elastic TOML rules. LOLBAS is a hard gate — every binary-scoped rule must enumerate all known abuse patterns first. LOLFarm enriches with driver, DLL hijack, RMM, and FP intelligence. 6-dimension validation (Evasion, Fields, Paths, FP, Syntax, LOLFarm). | "Write a detection for X", "Sigma for T1003", "my rule FPs too much" |
 | **advisory-ingest** | Parses CISA advisories, vendor reports, DFIR writeups. Extracts T-IDs, CVEs, IOCs, validates against local data, produces prioritized gap table. | "New CISA advisory dropped", "check this report" |
+| **threat-report-parser** | Turns unstructured intel (vendor blogs, Red Team writeups, malware analysis, conference talks) into scored, deployment-ready Sigma/KQL/SPL detection rules. Deeper than advisory-ingest — fully operationalizes a report. | "Parse this Mandiant blog into rules", "operationalize this Red Team writeup" |
 | **killchain-synth** | Stitches atomic rules into correlated multi-phase queries (KQL let-join, SPL phase-scored, Sigma correlation). Only fires when the full attack sequence is observed on the same host/identity within a time window. | "Correlate these techniques into one alert" |
 | **detection-validator** | Maps detection conditions to ART test artifacts, scores field-level coverage, generates executable test runbooks. Issues DEPLOY-READY / DEPLOY-WITH-CAUTION / DO NOT DEPLOY verdict. | "Will this rule actually fire?" |
 | **data-source-mapper** | Maps techniques to required MITRE data sources, identifies collection gaps, outputs exact Sysmon XML / audit policy / GPO configuration. | "Do I have the logs needed for T1003?" |
@@ -208,16 +212,17 @@ Advisory / Threat Report
 
 ## Data Indexed
 
-### Detection Rules — 11,814
+### Detection Rules — 12,810
 
 | Source | Rules | Format |
 |---|---|---|
+| Azure Sentinel (KQL) | 5,051 | KQL/YAML |
 | SigmaHQ | 3,108 | YAML |
 | Splunk ESCU | 1,966 | YAML |
 | Elastic | 1,689 | TOML/YAML |
-| Azure Sentinel (KQL) | 5,051 | KQL/YAML |
+| Sublime Security | 996 | YAML |
 
-**MITRE technique coverage:** 606 of 835 techniques (72.6%) have at least one detection rule mapped.
+**MITRE technique coverage:** 602 of 835 techniques (72.1%) have at least one detection rule mapped.
 
 ### MITRE ATT&CK v18.1
 
@@ -491,6 +496,7 @@ security-detections-mcp/
 │   ├── SKILL.md                    # 7-step pipeline, 5-platform output, LOLBAS gate, LOLFarm validation
 │   └── references/                 # sigma-template, fp-*, kql-patterns, spl-patterns, validation-rubric, etc.
 ├── advisory-ingest/
+├── threat-report-parser/
 ├── killchain-synth/
 ├── detection-validator/
 ├── data-source-mapper/

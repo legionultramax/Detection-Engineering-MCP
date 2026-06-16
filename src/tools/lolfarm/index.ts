@@ -493,14 +493,27 @@ const getLolfarmContext = defineTool({
   inputSchema: {
     type: 'object',
     properties: {
-      technique_id: { type: 'string', description: 'MITRE technique ID (e.g., "T1059.001", "T1562.001", "T1574.002")' },
+      technique_id: { type: 'string', description: 'MITRE technique ID (e.g., "T1059.001", "T1562.001", "T1574.002"). Optional in summary mode — omitted technique returns a corpus-wide overview.' },
       mode: { type: 'string', enum: ['summary', 'detailed', 'full'], description: 'Response verbosity. Default "summary" for cheap recon. Escalate only when needed.' },
     },
-    required: ['technique_id'],
   },
   handler: async (args) => {
     ensureSeedData();
-    const { technique_id, mode = 'summary' } = args as { technique_id: string; mode?: 'summary' | 'detailed' | 'full' };
+    const { technique_id, mode = 'summary' } = args as { technique_id?: string; mode?: 'summary' | 'detailed' | 'full' };
+
+    if (!technique_id) {
+      if (mode !== 'summary') {
+        return { error: 'technique_id is required for detailed or full mode. Omit it only for summary (corpus-wide counts).' };
+      }
+      const stats = getLOLFarmStats();
+      return {
+        mode: 'summary',
+        scope: 'corpus',
+        summary: 'LOLFarm corpus overview — no technique filter applied.',
+        sources: stats,
+        next_step: 'Pass technique_id (e.g., "T1059.001") to scope this to a single MITRE technique, or use lookup_loldriver / lookup_hijacklib / lookup_lolrmm / lookup_lofp / lookup_wadcom / lookup_lots_domain / lookup_malapi for per-source lookups.',
+      };
+    }
 
     const context = getLOLFarmContext(technique_id);
 

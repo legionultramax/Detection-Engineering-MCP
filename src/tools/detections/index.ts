@@ -264,6 +264,41 @@ const getStats = defineTool({
   },
 });
 
+// Parse a TEXT column that should hold a JSON array of strings, but in legacy
+// rows may hold a scalar like "CommandAndControl" (which JSON.parse returns as
+// a string — iterating that yields one char per element). Always returns an array.
+function parseStringList(raw: string | null | undefined): string[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) return parsed.filter(v => typeof v === 'string');
+    if (typeof parsed === 'string') return [parsed];
+    return [];
+  } catch {
+    return typeof raw === 'string' ? [raw] : [];
+  }
+}
+
+// Canonical MITRE tactic slugs. Legacy ingest produced variants like
+// "CommandAndControl", "Command and Control", "command and control", "CommandandControl".
+// Normalize all to the lowercase-hyphenated form ATT&CK uses.
+const TACTIC_CANONICAL: ReadonlySet<string> = new Set([
+  'reconnaissance', 'resource-development', 'initial-access', 'execution',
+  'persistence', 'privilege-escalation', 'defense-evasion', 'credential-access',
+  'discovery', 'lateral-movement', 'collection', 'command-and-control',
+  'exfiltration', 'impact',
+]);
+function normalizeTactic(raw: string): string | null {
+  if (!raw || typeof raw !== 'string') return null;
+  const slug = raw
+    .trim()
+    .replace(/([a-z])([A-Z])/g, '$1-$2')  // CommandAndControl -> Command-And-Control
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-')
+    .toLowerCase();
+  return TACTIC_CANONICAL.has(slug) ? slug : null;
+}
+
 // Shared threat profile map — used by identify_gaps and get_top_gaps
 const PROFILE_TECHNIQUES: Record<string, string[]> = {
   'ransomware':        ['T1486', 'T1490', 'T1489', 'T1083', 'T1082', 'T1059', 'T1047', 'T1021'],
@@ -301,10 +336,13 @@ const analyzeCoverage = defineTool({
     const tacticCounts: Record<string, number> = {};
 
     for (const row of results) {
-      const techniques = JSON.parse(row.mitre_techniques || '[]') as string[];
-      const tactics = JSON.parse(row.mitre_tactics || '[]') as string[];
-      for (const t of techniques) techniqueCounts[t] = (techniqueCounts[t] || 0) + 1;
-      for (const t of tactics)    tacticCounts[t]    = (tacticCounts[t]    || 0) + 1;
+      for (const t of parseStringList(row.mitre_techniques)) {
+        techniqueCounts[t] = (techniqueCounts[t] || 0) + 1;
+      }
+      for (const raw of parseStringList(row.mitre_tactics)) {
+        const norm = normalizeTactic(raw);
+        if (norm) tacticCounts[norm] = (tacticCounts[norm] || 0) + 1;
+      }
     }
 
     const sortedTactics = Object.entries(tacticCounts).sort((a, b) => b[1] - a[1]);
@@ -329,23 +367,48 @@ const analyzeCoverage = defineTool({
 // Identify coverage gaps for a threat profile
 const identifyGaps = defineTool({
   name: 'identify_gaps',
-  description: 'Find detection gaps for a threat profile (ransomware, apt, initial-access, persistence, credential-access, defense-evasion). Returns per-technique rule counts and zero-coverage gap IDs. Use source_type to scope to a specific rule source.',
+  description: 'Find detection gaps for a threat profile (ransomware, apt, initial-access, persistence, credential-access, defense-evasion). Returns per-technique rule counts and zero-coverage gap IDs. Use source_type to scope to a specific rule source. Call with no arguments to list available profiles and a coverage overview across all of them.',
   inputSchema: {
     type: 'object',
     properties: {
       profile: {
         type: 'string',
-        description: 'Threat profile: ransomware, apt, initial-access, persistence, credential-access, defense-evasion',
+        description: 'Threat profile: ransomware, apt, initial-access, persistence, credential-access, defense-evasion. Omit to get an overview across all profiles.',
       },
       source_type: {
         type: 'string',
         description: 'Optional: filter by source (sigma, splunk_escu, elastic, kql)',
       },
     },
-    required: ['profile'],
   },
   handler: async (args) => {
-    const { profile, source_type } = args as { profile: string; source_type?: string };
+    const { profile, source_type } = args as { profile?: string; source_type?: string };
+
+    if (!profile) {
+      // Overview mode — summary per profile so callers can pick one.
+      const overview: Record<string, { techniques: number; covered: number; gaps: number; coverage_pct: number }> = {};
+      for (const [name, techs] of Object.entries(PROFILE_TECHNIQUES)) {
+        let covered = 0;
+        for (const t of techs) {
+          let sql = 'SELECT COUNT(*) as count FROM detections WHERE mitre_techniques LIKE ?';
+          const params: unknown[] = [`%${t}%`];
+          if (source_type) { sql += ' AND source_type = ?'; params.push(source_type); }
+          if ((runQuery<{ count: number }>(sql, params)[0]?.count || 0) > 0) covered++;
+        }
+        overview[name] = {
+          techniques: techs.length,
+          covered,
+          gaps: techs.length - covered,
+          coverage_pct: Math.round((covered / techs.length) * 100),
+        };
+      }
+      return {
+        available_profiles: Object.keys(PROFILE_TECHNIQUES),
+        source_type: source_type || 'all',
+        overview,
+        next_step: 'Re-call identify_gaps with profile="<name>" to get per-technique gap details.',
+      };
+    }
 
     const targetTechniques = PROFILE_TECHNIQUES[profile.toLowerCase()];
     if (!targetTechniques) {

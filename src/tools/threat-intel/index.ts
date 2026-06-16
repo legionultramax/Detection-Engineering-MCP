@@ -45,7 +45,7 @@ import {
 import { 
   getMitreTechnique, searchMitreTechniques, cacheMitreTechnique,
   getCVE, cacheCVE, 
-  getKEV, getAllKEV, isInKEV, cacheKEV,
+  getKEV, getAllKEV, cacheKEV,
   getLOLBAS, searchLOLBAS, cacheLOLBAS,
 } from '../../db/threat-intel.js';
 import { runQuery, runStatement } from '../../db/connection.js';
@@ -300,10 +300,25 @@ const checkCisaKev = defineTool({
   handler: async (args) => {
     const { cve_id } = args as { cve_id: string };
     const normalizedCve = cve_id.toUpperCase();
-    
-    const inKev = isInKEV(normalizedCve);
-    const kevEntry = getKEV(normalizedCve);
-    
+
+    let kevEntry = getKEV(normalizedCve);
+
+    // Cache miss → refresh from CISA. The local cache is sometimes empty
+    // (fresh install, never-synced) which produces false negatives.
+    if (!kevEntry) {
+      try {
+        await refreshKEVCache();
+        kevEntry = getKEV(normalizedCve);
+      } catch (err) {
+        return {
+          cve: normalizedCve,
+          in_kev: false,
+          note: `CVE not in local KEV cache and live refresh failed: ${(err as Error).message}. Cache may be empty.`,
+          kev_url: 'https://www.cisa.gov/known-exploited-vulnerabilities-catalog',
+        };
+      }
+    }
+
     if (kevEntry) {
       return {
         cve: normalizedCve,
@@ -318,15 +333,43 @@ const checkCisaKev = defineTool({
         ransomware_use: kevEntry.known_ransomware_campaign,
       };
     }
-    
+
     return {
       cve: normalizedCve,
       in_kev: false,
-      note: 'CVE not found in CISA KEV. This does not mean it is not exploited, just not in the catalog.',
+      note: 'CVE not found in CISA KEV (after live refresh). This does not mean it is not exploited, just not in the catalog.',
       kev_url: 'https://www.cisa.gov/known-exploited-vulnerabilities-catalog',
     };
   },
 });
+
+// Live-refresh of the CISA KEV catalog. Cached for 12h to avoid hammering CISA
+// on every call when a sequence of CVEs is being checked.
+const KEV_CATALOG_URL = 'https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json';
+let kevLastRefresh = 0;
+const KEV_REFRESH_TTL_MS = 12 * 60 * 60 * 1000;
+async function refreshKEVCache(): Promise<void> {
+  if (Date.now() - kevLastRefresh < KEV_REFRESH_TTL_MS) return;
+  const res = await fetch(KEV_CATALOG_URL, { headers: { 'User-Agent': 'harris-hawkeye-mcp/1.0' } });
+  if (!res.ok) throw new Error(`CISA KEV fetch failed: HTTP ${res.status}`);
+  const catalog = await res.json() as { vulnerabilities?: Array<Record<string, unknown>> };
+  const vulns = catalog.vulnerabilities || [];
+  for (const v of vulns) {
+    cacheKEV({
+      cve_id: String(v.cveID || '').toUpperCase(),
+      vendor_project: v.vendorProject as string | undefined,
+      product: v.product as string | undefined,
+      vulnerability_name: v.vulnerabilityName as string | undefined,
+      date_added: v.dateAdded as string | undefined,
+      short_description: v.shortDescription as string | undefined,
+      required_action: v.requiredAction as string | undefined,
+      due_date: v.dueDate as string | undefined,
+      known_ransomware_campaign: v.knownRansomwareCampaignUse as string | undefined,
+      notes: v.notes as string | undefined,
+    });
+  }
+  kevLastRefresh = Date.now();
+}
 
 // Get threat profile summary
 const getThreatProfile = defineTool({

@@ -15,6 +15,34 @@ export interface IndexResult {
   errors: string[];
 }
 
+// Canonical MITRE tactic slugs (lowercase-hyphenated form ATT&CK uses).
+const _TACTIC_CANONICAL: ReadonlySet<string> = new Set([
+  'reconnaissance', 'resource-development', 'initial-access', 'execution',
+  'persistence', 'privilege-escalation', 'defense-evasion', 'credential-access',
+  'discovery', 'lateral-movement', 'collection', 'command-and-control',
+  'exfiltration', 'impact',
+]);
+
+// Coerce any tactic input (string, array, null, mixed-case "CommandAndControl",
+// "Command and Control", etc.) into a deduped JSON array of canonical slugs.
+// Use this for every mitre_tactics write so the DB only ever contains the
+// canonical form and analyze_coverage / list_by_mitre_tactic stay consistent.
+export function serializeTactics(input: unknown): string {
+  const raw: unknown[] = Array.isArray(input) ? input : (input == null ? [] : [input]);
+  const out = new Set<string>();
+  for (const v of raw) {
+    if (typeof v !== 'string') continue;
+    const slug = v
+      .trim()
+      .replace(/([a-z])([A-Z])/g, '$1-$2')
+      .replace(/\s+/g, '-')
+      .replace(/-+/g, '-')
+      .toLowerCase();
+    if (_TACTIC_CANONICAL.has(slug)) out.add(slug);
+  }
+  return JSON.stringify([...out]);
+}
+
 export function needsIndexing(): boolean {
   const result = runQuery<{ count: number }>('SELECT COUNT(*) as count FROM detections');
   return result[0]?.count === 0;
@@ -245,7 +273,7 @@ function indexSigmaRules(basePath: string): number {
           rule.detection ? JSON.stringify(rule.detection) : null,
           content,
           filePath,
-          JSON.stringify(tactics),
+          serializeTactics(tactics),
           JSON.stringify(techniques),
           rule.tags ? JSON.stringify(rule.tags) : null,
           rule.references ? JSON.stringify(rule.references) : null,
@@ -416,7 +444,7 @@ function indexElasticRules(basePath: string): number {
           rule.query || null,
           content,
           filePath,
-          JSON.stringify(tactics),
+          serializeTactics(tactics),
           JSON.stringify(techniques),
           rule.tags ? JSON.stringify(rule.tags) : null,
           rule.references ? JSON.stringify(rule.references) : null,
@@ -488,7 +516,7 @@ function indexElasticRules(basePath: string): number {
           (rule.query as string) || null,
           content,
           filePath,
-          JSON.stringify(tactics),
+          serializeTactics(tactics),
           JSON.stringify(techniques),
           rule.tags ? JSON.stringify(rule.tags) : null,
           rule.references ? JSON.stringify(rule.references) : null,
@@ -568,7 +596,7 @@ function indexKqlRules(basePath: string): number {
           queryText || null,
           content,
           filePath,
-          JSON.stringify(rule.tactics || []),
+          serializeTactics(rule.tactics),
           JSON.stringify(rule.relevantTechniques || []),
           rule.tags ? JSON.stringify(rule.tags) : null,
           rule.references ? JSON.stringify(rule.references) : null,

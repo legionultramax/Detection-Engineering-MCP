@@ -202,18 +202,65 @@ const getDataSources = defineTool({
   handler: async (args) => {
     const { technique_id } = args as { technique_id: string };
     const sources = getDataSourcesForTechnique(technique_id) as Array<Record<string, unknown>>;
-    
+
     if (sources.length === 0) {
-      // Try to get from technique's detection field
+      // MITRE STIX schema changed: 'detects' relationships now originate from
+      // x-mitre-detection-strategy objects (not yet ingested), so the canonical
+      // join returns nothing for most techniques. Fall back to aggregating the
+      // data_sources / logsource fields from rules that already cover this
+      // technique — the empirical telemetry footprint.
+      const techniqueLike = `%${technique_id.toUpperCase()}%`;
+      const ruleRows = runQuery<Record<string, unknown>>(
+        `SELECT data_sources, logsource_product, logsource_category, logsource_service
+         FROM detections
+         WHERE mitre_techniques LIKE ? AND (data_sources IS NOT NULL OR logsource_category IS NOT NULL)`,
+        [techniqueLike]
+      );
+
+      const sourceCounts: Record<string, number> = {};
+      const productCounts: Record<string, number> = {};
+      const categoryCounts: Record<string, number> = {};
+      for (const row of ruleRows) {
+        const ds = row.data_sources as string | null;
+        if (ds) {
+          try {
+            const parsed = JSON.parse(ds);
+            const list = Array.isArray(parsed) ? parsed : [parsed];
+            for (const s of list) {
+              if (typeof s === 'string') sourceCounts[s] = (sourceCounts[s] || 0) + 1;
+            }
+          } catch { /* ignore malformed */ }
+        }
+        if (row.logsource_product) {
+          const p = row.logsource_product as string;
+          productCounts[p] = (productCounts[p] || 0) + 1;
+        }
+        if (row.logsource_category) {
+          const c = row.logsource_category as string;
+          categoryCounts[c] = (categoryCounts[c] || 0) + 1;
+        }
+      }
+
       const technique = runQuery<Record<string, unknown>>(
         `SELECT detection FROM mitre_techniques_full WHERE external_id = ?`,
         [technique_id.toUpperCase()]
       );
-      
+
+      const inferredSources = Object.entries(sourceCounts)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 10)
+        .map(([name, count]) => ({ name, rule_count: count, source: 'inferred_from_rules' }));
+
       return {
         technique_id,
-        detection_guidance: technique[0]?.detection || 'No specific detection guidance available',
-        data_sources: [],
+        detection_guidance: technique[0]?.detection || 'No MITRE detection guidance available for this technique.',
+        data_sources: inferredSources,
+        inferred_logsource_products: Object.entries(productCounts).sort((a, b) => b[1] - a[1]).slice(0, 10).map(([n, c]) => ({ product: n, rule_count: c })),
+        inferred_logsource_categories: Object.entries(categoryCounts).sort((a, b) => b[1] - a[1]).slice(0, 10).map(([n, c]) => ({ category: n, rule_count: c })),
+        rules_analyzed: ruleRows.length,
+        note: inferredSources.length > 0
+          ? 'MITRE canonical data_sources unavailable for this technique (STIX schema migration). Sources above were inferred from local detection rules that cover this technique.'
+          : 'No data sources found in MITRE or local detection rules for this technique.',
       };
     }
     

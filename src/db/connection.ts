@@ -63,6 +63,69 @@ function migrateDetectionsTable(db: SqlJsDatabase): void {
       }
     }
   }
+
+  normalizeTacticsInPlace(db);
+}
+
+// One-shot normalization of mitre_tactics rows that were written before the
+// indexer started using serializeTactics(). Idempotent: rows already in
+// canonical JSON-array-of-slugs form are skipped. Runs every startup but only
+// rewrites rows that are demonstrably malformed (scalar JSON string, or any
+// non-canonical tactic name), so it's cheap after the first pass.
+const _TACTIC_CANONICAL_DB: ReadonlySet<string> = new Set([
+  'reconnaissance', 'resource-development', 'initial-access', 'execution',
+  'persistence', 'privilege-escalation', 'defense-evasion', 'credential-access',
+  'discovery', 'lateral-movement', 'collection', 'command-and-control',
+  'exfiltration', 'impact',
+]);
+function _canonTactic(raw: string): string | null {
+  const slug = raw.trim()
+    .replace(/([a-z])([A-Z])/g, '$1-$2')
+    .replace(/\s+/g, '-').replace(/-+/g, '-').toLowerCase();
+  return _TACTIC_CANONICAL_DB.has(slug) ? slug : null;
+}
+function normalizeTacticsInPlace(db: SqlJsDatabase): void {
+  try {
+    const stmt = db.prepare(
+      'SELECT id, mitre_tactics FROM detections WHERE mitre_tactics IS NOT NULL'
+    );
+    const fixes: Array<{ id: string; value: string }> = [];
+    while (stmt.step()) {
+      const row = stmt.getAsObject() as { id: string; mitre_tactics: string };
+      const raw = row.mitre_tactics;
+      let isCanonical = false;
+      let normalized: string[] = [];
+      try {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed) && parsed.every(v => typeof v === 'string' && _TACTIC_CANONICAL_DB.has(v))) {
+          isCanonical = true;
+        } else {
+          const items: unknown[] = Array.isArray(parsed) ? parsed : [parsed];
+          const seen = new Set<string>();
+          for (const v of items) {
+            if (typeof v !== 'string') continue;
+            const slug = _canonTactic(v);
+            if (slug) seen.add(slug);
+          }
+          normalized = [...seen];
+        }
+      } catch {
+        const slug = _canonTactic(raw);
+        if (slug) normalized = [slug];
+      }
+      if (!isCanonical) fixes.push({ id: row.id, value: JSON.stringify(normalized) });
+    }
+    stmt.free();
+
+    if (fixes.length === 0) return;
+    console.error(`[db] Normalizing mitre_tactics for ${fixes.length} legacy rows...`);
+    const upd = db.prepare('UPDATE detections SET mitre_tactics = ? WHERE id = ?');
+    for (const f of fixes) { upd.run([f.value, f.id]); }
+    upd.free();
+    console.error(`[db] Tactic normalization complete.`);
+  } catch (err) {
+    console.error('[db] Tactic normalization failed (non-fatal):', (err as Error).message);
+  }
 }
 
 export async function initDbAsync(): Promise<SqlJsDatabase> {

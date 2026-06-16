@@ -76,7 +76,12 @@
       "Bash(gh api *)",
       "Bash(python3 -c \"import json,sys; t=json.load\\(sys.stdin\\); [print\\(i['path']\\) for i in t.get\\('tree',[]\\) if i['type']=='blob']\")",
       "Bash(git add *)",
-      "Bash(git commit *)"
+      "Bash(git commit *)",
+      "Bash(git remote *)",
+      "Bash(git branch *)",
+      "Bash(git push *)",
+      "Bash(gh auth *)",
+      "Read(//c/Users/harsh/.ssh/**)"
     ]
   },
   "hooks": {
