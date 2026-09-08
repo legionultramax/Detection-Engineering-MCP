@@ -63,3 +63,38 @@ Files authored by this project (MIT, like the rest of the repository):
 .claude/skills/README.md
 .claude/skills/NOTICE.md
 ```
+
+---
+
+## Second source — CrowdStrike Falcon Events Data Dictionary
+
+Separate origin and separate author from the Haag content above, but also Apache-2.0.
+
+- **Project:** CrowdStrike-Falcon-Events-Data-Dictionary
+- **Repository:** https://github.com/erickatwork/CrowdStrike-Falcon-Events-Data-Dictionary
+- **Author:** erickatwork
+- **License:** Apache License 2.0 (as declared in the skill's own frontmatter)
+- **Retrieved:** 2026-09-08, from `data/current/` (the upstream's rolling latest snapshot)
+
+### Files
+
+```
+.claude/skills/crowdstrike-falcon-events/SKILL.md
+data/third-party/crowdstrike-events/sensor_events.csv
+```
+
+`SKILL.md` follows the upstream text, with a "Known extraction artifacts" section added by this
+project recording two `platforms` values that appear wrong (`ProcessRollup2` listed Windows-only,
+`DnsRequest` listed Android-only). The CSV is verbatim — 998 rows, 661 with descriptions.
+
+### Third-party content within it
+
+The event names and descriptions in that dataset are **CrowdStrike's**, extracted from their
+documentation and reproduced for reference. "CrowdStrike" and "Falcon" are trademarks of
+CrowdStrike, Inc. That upstream project is unofficial and not affiliated with or endorsed by
+CrowdStrike, and neither is this one.
+
+It is a point-in-time community export, not a source of truth. Anything built on it — including the
+CQL field catalog in this repository — must be verified against
+https://docs.crowdstrike.com/r/en-US/sensormap.ftmap before being relied on for a production
+detection.
