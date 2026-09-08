@@ -35,8 +35,9 @@ const SERVER_VERSION = '1.0.0';
 // Server instructions are generated from the live tool registry rather than
 // hand-maintained. A hardcoded list drifts the moment a tool is added, renamed,
 // or dropped — and advertising a tool that does not exist causes models to emit
-// calls that fail with "Unknown tool". Names are filtered through the registry
-// so only genuinely callable tools can ever appear here.
+// calls that fail with "Unknown tool". Names are filtered through the registry's
+// active profile, so a scoped deployment describes only what it will actually
+// dispatch and the instructions shrink with the profile automatically.
 function buildServerInstructions(): string {
   const categories: Array<{ label: string; tools: ToolDefinition[] }> = [
     { label: 'Detection Search & Analysis', tools: detectionTools },
@@ -56,18 +57,37 @@ function buildServerInstructions(): string {
   for (const { label, tools } of categories) {
     const names = tools
       .map(t => t.name)
-      .filter(name => toolRegistry.has(name))
+      .filter(name => toolRegistry.isActive(name))
       .sort();
     if (names.length === 0) continue;
     total += names.length;
     sections.push(`### ${label} (${names.length})\n${names.join(', ')}`);
   }
 
+  // Only advertise starting points that are actually reachable — under a scoped
+  // profile some of these are not exposed.
+  const startingPoints: Array<[string, string]> = [
+    ['get_stats', 'get_stats() — current detection inventory'],
+    ['search_detections', 'search_detections("<keywords>") — full-text search across all rule sources'],
+    ['list_by_mitre', 'list_by_mitre("T1059.001") — existing coverage for a technique'],
+    ['lookup_mitre_technique', 'lookup_mitre_technique("T1059.001") — technique detail, data sources, detection guidance'],
+    ['get_lolfarm_context', 'get_lolfarm_context("T1059.001") — living-off-the-land context for a technique'],
+  ];
+  const suggestions = startingPoints
+    .filter(([name]) => toolRegistry.isActive(name))
+    .map(([, line]) => `- ${line}`);
+
+  const scoped = toolRegistry.getProfile() !== null;
+
   return [
     '# Harris HawkEye MCP',
     '',
     `Detection engineering and threat intelligence server exposing ${total} tools.`,
     'Only the tools listed below exist. Do not call a tool that is not named here.',
+    ...(scoped
+      ? ['', 'This deployment runs a scoped tool profile. Other tools exist on the server but ' +
+         'are not available here; do not attempt to call them.']
+      : []),
     '',
     '## Tools by category',
     '',
@@ -81,11 +101,7 @@ function buildServerInstructions(): string {
     '- Threat intel: abuse.ch, AlienVault OTX, NVD/EPSS, CISA KEV, Malpedia, government CERT advisories',
     '',
     '## Suggested starting points',
-    '- get_stats() — current detection inventory',
-    '- search_detections("<keywords>") — full-text search across all rule sources',
-    '- list_by_mitre("T1059.001") — existing coverage for a technique',
-    '- lookup_mitre_technique("T1059.001") — technique detail, data sources, detection guidance',
-    '- get_lolfarm_context("T1059.001") — living-off-the-land context for a technique',
+    ...suggestions,
   ].join('\n');
 }
 

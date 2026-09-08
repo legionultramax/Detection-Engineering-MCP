@@ -19,6 +19,39 @@ export interface ToolResult {
 class ToolRegistry {
   private tools: Map<string, ToolDefinition> = new Map();
 
+  /**
+   * Active tool profile, or null for no filtering.
+   *
+   * Applied in two places, both necessary. `toMcpTools()` shapes what a client
+   * is told exists; `execute()` enforces it. Filtering only the listing would
+   * be insufficient because mcpo and Open WebUI cache tool lists, and a model
+   * that saw a name earlier in a conversation will try it again.
+   */
+  private profile: Set<string> | null = null;
+
+  setProfile(names: readonly string[] | null): void {
+    this.profile = names === null ? null : new Set(names);
+  }
+
+  getProfile(): string[] | null {
+    return this.profile === null ? null : [...this.profile];
+  }
+
+  /** Whether a tool is exposed under the active profile. */
+  isActive(name: string): boolean {
+    return this.profile === null ? this.tools.has(name) : this.profile.has(name) && this.tools.has(name);
+  }
+
+  /** Registered names the active profile exposes, in registration order. */
+  getActiveNames(): string[] {
+    return this.getNames().filter(n => this.isActive(n));
+  }
+
+  /** Count of tools the active profile exposes, as opposed to count() which is the raw total. */
+  activeCount(): number {
+    return this.profile === null ? this.tools.size : this.getActiveNames().length;
+  }
+
   register(tool: ToolDefinition): void {
     if (this.tools.has(tool.name)) {
       console.warn(`[registry] Tool ${tool.name} already registered, overwriting`);
@@ -49,7 +82,16 @@ class ToolRegistry {
   async execute(name: string, args: Record<string, unknown>): Promise<unknown> {
     const tool = this.tools.get(name);
     if (!tool) {
-      throw new Error(`Unknown tool: ${name}. Available: ${this.getNames().join(', ')}`);
+      throw new Error(`Unknown tool: ${name}. Available: ${this.getActiveNames().join(', ')}`);
+    }
+    // Registered but out of profile. Reported distinctly from "unknown" so the
+    // cause is diagnosable — a client working from a cached tool list looks
+    // identical to a hallucinated name otherwise.
+    if (!this.isActive(name)) {
+      throw new Error(
+        `Tool ${name} exists but is not available under the active tool profile. ` +
+        `Available: ${this.getActiveNames().join(', ')}`
+      );
     }
     return tool.handler(args);
   }
@@ -70,11 +112,13 @@ class ToolRegistry {
   }
 
   toMcpTools(): Array<{ name: string; description: string; inputSchema: object }> {
-    return this.getAll().map(t => ({
-      name: t.name,
-      description: t.description,
-      inputSchema: t.inputSchema,
-    }));
+    return this.getAll()
+      .filter(t => this.isActive(t.name))
+      .map(t => ({
+        name: t.name,
+        description: t.description,
+        inputSchema: t.inputSchema,
+      }));
   }
 
   count(): number {

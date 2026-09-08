@@ -1,6 +1,8 @@
 // Tool aggregation and registration entry point
 export { toolRegistry, defineTool, registerTool } from './registry.js';
 export type { ToolDefinition, ToolResult } from './registry.js';
+export { PROFILES, WRITE_TOOLS, resolveProfile, unresolvedNames, UnknownProfileError } from './profiles.js';
+export type { ToolProfile } from './profiles.js';
 
 // Tool module imports
 import { detectionTools, detectionToolCount } from './detections/index.js';
@@ -62,6 +64,7 @@ export function getToolsSummary(): { total: number; names: string[]; threat_inte
       mitre_attack: mitreAttackToolCount,
       atomic_red_team: atomicRedTeamToolCount,
       coverage_engine: coverageEngineToolCount,
+      report_generator: reportGeneratorToolCount,
       sublime: sublimeToolCount,
       lolfarm: lolfarmToolCount,
     },

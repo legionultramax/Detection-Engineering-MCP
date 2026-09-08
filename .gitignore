@@ -72,3 +72,10 @@ navigator-layers/
 *.bak
 *.bak-*
 *.db.*
+
+# Internal architecture docs — kept local, never published.
+# The public repo is the tool server; the Phase 1/2/3 pipeline design, the
+# platform runbook and the integration questions describe client-facing hunt
+# infrastructure and an unfixed backend defect. Copies live in ~/hawkeye-docs.
+docs/PHASE1-INTEGRATION-PLAN.md
+docs/handoff/

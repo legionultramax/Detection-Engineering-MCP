@@ -13,8 +13,9 @@
  */
 
 import { createServer, startServer } from './server.js';
-import { registerAllTools, getToolsSummary } from './tools/index.js';
-import { initDbAsync } from './db/connection.js';
+import { registerAllTools, getToolsSummary, toolRegistry } from './tools/index.js';
+import { resolveProfile, unresolvedNames, PROFILES, WRITE_TOOLS } from './tools/profiles.js';
+import { initDbAsync, isReadOnly, runQuery } from './db/connection.js';
 import { indexDetections, needsIndexing, getMissingSources, countExpectedFiles } from './indexer.js';
 import { initKnowledgeSchema } from './db/knowledge.js';
 import { initThreatIntelSchema } from './db/threat-intel.js';
@@ -217,6 +218,37 @@ async function main() {
   // Initialize database (async for sql.js)
   await initDbAsync();
 
+  // Checked here, before any schema work, for two reasons.
+  //
+  // A read-only server with an empty database answers every question with
+  // silence, which for a detection tool is the worst available failure mode: it
+  // reads as "no coverage" rather than "misconfigured".
+  //
+  // And several schema initializers seed reference data rather than only
+  // declaring tables — initCoverageEngineSchema() calls seedTelemetryMappings()
+  // — which read-only refuses. On a populated database that seeding is skipped
+  // and never arises; on an empty one it would crash with EREADONLY and bury
+  // the actual problem in a stack trace.
+  if (isReadOnly()) {
+    let indexed = 0;
+    try {
+      const rows = runQuery<{ n: number }>('SELECT COUNT(*) AS n FROM detections');
+      indexed = rows[0]?.n ?? 0;
+    } catch {
+      indexed = 0;
+    }
+    if (indexed === 0) {
+      console.error(
+        '[harris-hawkeye-mcp] FATAL: read-only mode requested but the database holds no ' +
+        'detections. Read-only servers cannot index, so this instance would answer every ' +
+        'query with an empty result. Point DETECTIONS_DB_PATH at a populated database, or ' +
+        'start once without HAWKEYE_READONLY to build one.'
+      );
+      process.exit(1);
+    }
+    console.error(`[harris-hawkeye-mcp] read-only mode — ${indexed} detections available, indexing disabled`);
+  }
+
   // Initialize schemas for enhanced features
   initKnowledgeSchema();
   initThreatIntelSchema();
@@ -234,18 +266,94 @@ async function main() {
   console.error(`[harris-hawkeye-mcp] ${summary.total} tools registered`);
   console.error(`[harris-hawkeye-mcp] Modules: ${Object.entries(summary.byModule).map(([k, v]) => `${k}(${v})`).join(', ')}`);
 
+  // Apply the tool profile before the server is built, so the generated server
+  // instructions describe the scoped surface rather than the full registry.
+  // An unrecognised name is fatal: silently falling back to all 129 tools is
+  // the exact outcome profiles exist to prevent.
+  const profileName = process.env.HAWKEYE_TOOL_PROFILE;
+  try {
+    let active = resolveProfile(profileName, toolRegistry.getNames());
+
+    if (active !== null) {
+      const missing = unresolvedNames(profileName, toolRegistry.getNames());
+      if (missing.length > 0) {
+        console.error(
+          `[harris-hawkeye-mcp] WARNING: profile "${profileName}" names ${missing.length} ` +
+          `tool(s) not in the registry, so the surface is smaller than intended: ${missing.join(', ')}`
+        );
+      }
+      const desc = PROFILES[profileName!.trim()]?.description ?? '';
+      console.error(`[harris-hawkeye-mcp] Tool profile "${profileName}" active. ${desc}`);
+    }
+
+    // Read-only withholds the write tools regardless of profile. They cannot
+    // work, and failing to list them is better than letting the model spend a
+    // turn on one: several of them bulk-write and then call saveDb(), which in
+    // read-only applies to the in-memory image and silently never persists. A
+    // write that reports success and then evaporates is the worst outcome here.
+    if (isReadOnly()) {
+      const base = active ?? toolRegistry.getNames();
+      const denied = new Set<string>(WRITE_TOOLS);
+      const kept = base.filter(n => !denied.has(n));
+      const withheld = base.length - kept.length;
+      active = kept;
+      if (withheld > 0) {
+        console.error(`[harris-hawkeye-mcp] read-only mode — ${withheld} write tool(s) withheld`);
+      }
+    }
+
+    toolRegistry.setProfile(active);
+    if (active !== null) {
+      console.error(
+        `[harris-hawkeye-mcp] ${toolRegistry.activeCount()} of ${summary.total} tools exposed`
+      );
+    }
+  } catch (error) {
+    console.error(`[harris-hawkeye-mcp] FATAL: ${error instanceof Error ? error.message : String(error)}`);
+    process.exit(1);
+  }
+
   // Create and start server FIRST so MCP handshake completes immediately
   const server = createServer();
   await startServer(server);
 
   // THEN index detections in the background (after server is connected)
   // This prevents the 60-second MCP handshake timeout
-  autoIndex();
-  await autoIndexMitre();
-  await autoIndexArt();
-  await autoIndexSublime();
+  //
+  // Skipped entirely in read-only mode. These are the larger of the two write
+  // paths: autoIndexArt() and autoIndexSublime() git clone from the network and
+  // mkdir into data/, and nothing they index could be persisted anyway.
+  // HAWKEYE_SKIP_SYNC keeps local indexing but skips the two upstream git
+  // syncs. Worth having for two independent reasons.
+  //
+  // Atomic Red Team is a repository of working attack payloads — encoded
+  // PowerShell, credential-dumping scripts, and named offensive tooling. On an
+  // endpoint running EDR, pulling it generates alerts, and on an analyst's own
+  // machine those alerts land in the SOC queue they are on call for. Anyone
+  // running this where sync is not wanted needs a way to say so.
+  //
+  // It is also the startup latency. Both syncs use execSync, which blocks the
+  // event loop despite this section being placed after startServer() to avoid
+  // exactly that — so an unreachable remote stalls the MCP handshake for the
+  // full git timeout, around a minute per remote, and the client sees a server
+  // that accepted the connection and then went silent.
+  const skipSync = ['1', 'true', 'yes'].includes(
+    (process.env.HAWKEYE_SKIP_SYNC ?? '').trim().toLowerCase()
+  );
 
-  console.error('[harris-hawkeye-mcp] Indexing complete — fully ready');
+  if (isReadOnly()) {
+    console.error('[harris-hawkeye-mcp] read-only mode — skipping indexing and upstream sync');
+  } else {
+    autoIndex();
+    await autoIndexMitre();
+    if (skipSync) {
+      console.error('[harris-hawkeye-mcp] HAWKEYE_SKIP_SYNC set — skipping Atomic Red Team and Sublime git sync');
+    } else {
+      await autoIndexArt();
+      await autoIndexSublime();
+    }
+    console.error('[harris-hawkeye-mcp] Indexing complete — fully ready');
+  }
 }
 
 main().catch((error) => {

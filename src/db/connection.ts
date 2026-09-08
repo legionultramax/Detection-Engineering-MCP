@@ -8,6 +8,30 @@ let db: SqlJsDatabase | null = null;
 let SQL: Awaited<ReturnType<typeof initSqlJs>> | null = null;
 let dbPath: string = '';
 
+// Read-only mode. sql.js holds the whole database in memory, so nothing reaches
+// disk except through saveDb() — neutralizing that one function is what makes
+// the mode real, and is why in-memory CREATE TABLE in the init*Schema()
+// functions stays harmless. The write guards below exist for a different
+// reason: without them a knowledge-graph write would appear to succeed and then
+// silently evaporate on exit, which is worse than an error.
+let readOnlyCache: boolean | null = null;
+let readOnlyNoticeShown = false;
+
+export function isReadOnly(): boolean {
+  if (readOnlyCache === null) {
+    const raw = (process.env.HAWKEYE_READONLY ?? '').trim().toLowerCase();
+    readOnlyCache = raw === '1' || raw === 'true' || raw === 'yes';
+  }
+  return readOnlyCache;
+}
+
+function refuseWrite(): never {
+  throw new Error(
+    'EREADONLY: this server runs with HAWKEYE_READONLY set, so database writes are refused. ' +
+    'Knowledge-graph, cache, and indexing tools are unavailable in this mode; reads are unaffected.'
+  );
+}
+
 function getDbPath(): string {
   if (process.env.DETECTIONS_DB_PATH) {
     return process.env.DETECTIONS_DB_PATH;
@@ -264,20 +288,103 @@ export function getDb(): SqlJsDatabase {
   return db;
 }
 
+// Persist the in-memory image to disk.
+//
+// Written via a temporary file and renamed into place: rename is atomic within a
+// filesystem, so a crash or SIGKILL mid-write leaves either the previous image
+// or the new one, never a truncated 59MB file. The temp name carries the pid so
+// two processes cannot collide on it.
+//
+// Failures propagate. This used to swallow them, which made a full disk or a
+// permissions problem indistinguishable from success to every caller.
 export function saveDb(): void {
   if (!db || !dbPath) return;
-  try {
-    const data = db.export();
-    const buffer = Buffer.from(data);
-    fs.writeFileSync(dbPath, buffer);
-  } catch (error) {
-    console.error('[db] Save error:', error);
+
+  if (isReadOnly()) {
+    if (!readOnlyNoticeShown) {
+      console.error(`[db] read-only mode — ${dbPath} will not be modified`);
+      readOnlyNoticeShown = true;
+    }
+    return;
   }
+
+  const tmpPath = `${dbPath}.tmp-${process.pid}`;
+  let fd: number | undefined;
+  try {
+    const buffer = Buffer.from(db.export());
+    fd = fs.openSync(tmpPath, 'w');
+    fs.writeFileSync(fd, buffer);
+    fs.fsyncSync(fd);
+    fs.closeSync(fd);
+    fd = undefined;
+    renameWithRetry(tmpPath, dbPath, buffer);
+  } catch (error) {
+    if (fd !== undefined) {
+      try { fs.closeSync(fd); } catch { /* already closed or invalid */ }
+    }
+    try {
+      if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath);
+    } catch { /* leaving a stale temp file is preferable to masking the real error */ }
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`[db] Save failed: ${message}`);
+    throw error instanceof Error ? error : new Error(message);
+  }
+}
+
+/** Synchronous sleep. saveDb() is sync all the way down, so the retry has to be. */
+function sleepSync(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+// Windows fails rename-over-existing with EPERM/EBUSY whenever another handle is
+// open on the destination, and a freshly written multi-megabyte file attracts
+// exactly that from antivirus and the search indexer. The lock is transient, so
+// back off and retry before giving up.
+//
+// If every retry fails we write in place instead. That sacrifices atomicity —
+// the thing this function exists to provide — so it is a last resort and says so
+// loudly. Losing atomicity beats refusing to persist at all, and POSIX never
+// reaches this path.
+const RENAME_BACKOFF_MS = [100, 250, 500, 1000, 2000];
+let nonAtomicWarningShown = false;
+
+function renameWithRetry(tmpPath: string, target: string, buffer: Buffer): void {
+  let lastError: unknown;
+  for (let attempt = 0; attempt <= RENAME_BACKOFF_MS.length; attempt++) {
+    try {
+      fs.renameSync(tmpPath, target);
+      return;
+    } catch (error) {
+      lastError = error;
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code !== 'EPERM' && code !== 'EBUSY' && code !== 'EACCES') throw error;
+      if (attempt < RENAME_BACKOFF_MS.length) sleepSync(RENAME_BACKOFF_MS[attempt]);
+    }
+  }
+
+  if (!nonAtomicWarningShown) {
+    const code = (lastError as NodeJS.ErrnoException)?.code ?? 'unknown';
+    console.error(
+      `[db] atomic rename kept failing (${code}) after ${RENAME_BACKOFF_MS.length} retries — ` +
+      'falling back to an in-place write. A crash during a write can now truncate the database; ' +
+      'check for another process holding it open.'
+    );
+    nonAtomicWarningShown = true;
+  }
+  fs.writeFileSync(target, buffer);
+  try { fs.unlinkSync(tmpPath); } catch { /* best effort */ }
 }
 
 export function closeDb(): void {
   if (db) {
-    saveDb();
+    // A failed save during shutdown is worth reporting but not worth crashing
+    // on — there is nothing left to recover to at this point.
+    try {
+      saveDb();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(`[db] Save on shutdown failed, changes may be lost: ${message}`);
+    }
     db.close();
     db = null;
   }
@@ -317,7 +424,57 @@ function toSqlValue(val: unknown): string | number | Uint8Array | null {
   return JSON.stringify(val);
 }
 
+/**
+ * Execute schema DDL — CREATE TABLE / CREATE INDEX / ALTER.
+ *
+ * Differs from runStatement() in two ways: it does not call saveDb(), and it is
+ * permitted in read-only mode. Both follow from what DDL is here. sql.js holds
+ * the entire database in memory, so `CREATE TABLE IF NOT EXISTS` against an
+ * already-populated file changes nothing that needs flushing, and it is
+ * idempotent, so re-running it every boot is free.
+ *
+ * It was not free before. initMitreAttackTables() issued sixteen of these
+ * through runStatement(), each triggering a full export and rewrite of the
+ * ~59MB image — roughly 930MB of pointless I/O on every startup.
+ */
+export function runSchemaStatement(query: string, params: unknown[] = []): void {
+  const database = getDb();
+  try {
+    if (params.length > 0) {
+      database.run(query, params.map(toSqlValue));
+    } else {
+      database.run(query);
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`[db] Schema statement error: ${message}`);
+    throw error;
+  }
+}
+
+/**
+ * Execute a write whose only purpose is caching.
+ *
+ * In read-only mode this is a silent no-op rather than an error, because the
+ * caller already holds the value it was trying to cache — failing the write
+ * would fail a read that had already succeeded.
+ *
+ * That is not hypothetical. `lookup_lolbas`, `nvd_cve_lookup` and
+ * `check_cisa_kev` all fetch or query, then cache. Routing them through
+ * runStatement() made three read-only tools throw EREADONLY on a successful
+ * lookup, and all three sit in the phase1-authoring profile.
+ *
+ * Use this only where losing the write is genuinely harmless. Anything a user
+ * or model would consider durable belongs in runStatement(), which refuses
+ * loudly instead.
+ */
+export function runCacheStatement(query: string, params: unknown[] = []): void {
+  if (isReadOnly()) return;
+  runStatement(query, params);
+}
+
 export function runStatement(query: string, params: unknown[] = []): void {
+  if (isReadOnly()) refuseWrite();
   const database = getDb();
   try {
     if (params.length > 0) {
@@ -335,6 +492,19 @@ export function runStatement(query: string, params: unknown[] = []): void {
 }
 
 // Bulk insert helper — skips per-row saveDb() for performance during batch operations
+// Deliberately NOT guarded by read-only mode, unlike runStatement().
+//
+// This function never calls saveDb(), so it has no path to disk — it mutates
+// only the in-memory image. Read-only is enforced by neutralizing saveDb(), and
+// blocking this as well was a mistake: it broke every path that populates
+// reference data from in-code constants, including the 138 coverage telemetry
+// mappings seeded at startup and the lazy LOLFarm seed that get_lolfarm_context
+// depends on. A read-only server pointed at a database lacking that seed data
+// would crash on startup — precisely the deployment where a prebuilt database is
+// copied onto the host.
+//
+// Letting it run is the correct behaviour: seeds and caches populate for the
+// session, nothing persists, the file on disk is untouched.
 export function runBulkStatement(query: string, params: unknown[] = []): void {
   const database = getDb();
   try {

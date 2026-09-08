@@ -1,6 +1,6 @@
 // Threat Intelligence Database Schema
 // Caches data from MITRE ATT&CK, CVE/NVD, CISA KEV, LOLBAS, etc.
-import { getDb, runQuery, runStatement } from './connection.js';
+import { getDb, runQuery, runCacheStatement } from './connection.js';
 
 export function initThreatIntelSchema(): void {
   const db = getDb();
@@ -138,7 +138,7 @@ export interface MitreTechnique {
 }
 
 export function cacheMitreTechnique(technique: MitreTechnique): void {
-  runStatement(
+  runCacheStatement(
     `INSERT OR REPLACE INTO mitre_techniques 
      (id, name, description, tactic_ids, tactic_names, platforms, permissions_required, 
       data_sources, detection, mitigations, refs, is_subtechnique, parent_id, url, last_updated)
@@ -204,7 +204,7 @@ export interface CVEEntry {
 }
 
 export function cacheCVE(cve: CVEEntry): void {
-  runStatement(
+  runCacheStatement(
     `INSERT OR REPLACE INTO cve_cache 
      (id, description, severity, cvss_score, cvss_vector, cwe_ids, affected_products,
       refs, published_date, last_modified, exploit_available, last_updated)
@@ -247,7 +247,7 @@ export interface KEVEntry {
 }
 
 export function cacheKEV(kev: KEVEntry): void {
-  runStatement(
+  runCacheStatement(
     `INSERT OR REPLACE INTO cisa_kev 
      (cve_id, vendor_project, product, vulnerability_name, date_added, short_description,
       required_action, due_date, known_ransomware_campaign, notes, last_updated)
@@ -286,7 +286,7 @@ export interface LOLBASEntry {
 }
 
 export function cacheLOLBAS(entry: LOLBASEntry): void {
-  runStatement(
+  runCacheStatement(
     `INSERT OR REPLACE INTO lolbas 
      (name, description, author, created, commands, full_path, detection, resources, mitre_techniques, last_updated)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,

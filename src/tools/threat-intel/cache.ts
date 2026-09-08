@@ -11,7 +11,7 @@
  * Cache misses and write failures are always silent — never block a query.
  */
 
-import { runQuery, runStatement } from '../../db/connection.js';
+import { runQuery, runCacheStatement } from '../../db/connection.js';
 
 /** TTL in seconds for OTX (AlienVault) responses */
 export const OTX_TTL = 7_200;   // 2 hours
@@ -42,7 +42,7 @@ export function getCached<T>(key: string): T | null {
       if (expiresAt <= new Date()) {
         // Delete stale entry — best effort, ignore failures
         try {
-          runStatement('DELETE FROM cache WHERE key = ?', [key]);
+          runCacheStatement('DELETE FROM cache WHERE key = ?', [key]);
         } catch { /* ignore */ }
         return null;
       }
@@ -61,7 +61,7 @@ export function getCached<T>(key: string): T | null {
 export function setCached(key: string, value: unknown, ttlSeconds: number): void {
   try {
     const expiresAt = new Date(Date.now() + ttlSeconds * 1_000).toISOString();
-    runStatement(
+    runCacheStatement(
       'INSERT OR REPLACE INTO cache (key, value, expires_at) VALUES (?, ?, ?)',
       [key, JSON.stringify(value), expiresAt],
     );
@@ -76,7 +76,7 @@ export function setCached(key: string, value: unknown, ttlSeconds: number): void
  */
 export function evictExpiredCache(): void {
   try {
-    runStatement('DELETE FROM cache WHERE expires_at IS NOT NULL AND expires_at <= ?', [
+    runCacheStatement('DELETE FROM cache WHERE expires_at IS NOT NULL AND expires_at <= ?', [
       new Date().toISOString(),
     ]);
   } catch { /* ignore */ }
