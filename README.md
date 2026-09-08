@@ -82,8 +82,8 @@ The primary output is **kill-chain correlated queries** (KQL + SPL + Sigma), not
 ### Installation
 
 ```bash
-git clone <repo-url> security-detections-mcp
-cd security-detections-mcp
+git clone https://github.com/legionultramax/Detection-Engineering-MCP.git
+cd Detection-Engineering-MCP
 
 # Install dependencies
 npm install

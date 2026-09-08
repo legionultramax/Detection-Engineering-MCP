@@ -8,6 +8,14 @@
   "bin": {
     "harris-hawkeye": "dist/index.js"
   },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/legionultramax/Detection-Engineering-MCP.git"
+  },
+  "homepage": "https://github.com/legionultramax/Detection-Engineering-MCP#readme",
+  "bugs": {
+    "url": "https://github.com/legionultramax/Detection-Engineering-MCP/issues"
+  },
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
