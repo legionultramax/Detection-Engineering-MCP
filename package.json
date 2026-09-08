@@ -21,6 +21,8 @@
     "start": "node dist/index.js",
     "dev": "tsc --watch",
     "test": "npm run build && node tests/test.js",
+    "tools:inventory": "node scripts/tool-inventory.mjs",
+    "tools:check": "npm run build && node scripts/tool-inventory.mjs --check",
     "lint": "tsc --noEmit --strict",
     "prepublishOnly": "npm run build && npm run lint"
   },
