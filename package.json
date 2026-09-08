@@ -25,6 +25,7 @@
     "tools:check": "npm run build && node scripts/tool-inventory.mjs --check",
     "verify:readonly": "npm run build && node tests/verify-readonly-profiles.mjs",
     "verify:queries": "npm run build && node tests/verify-query-validation.mjs",
+    "verify:search": "npm run build && node tests/verify-search-ranking.mjs",
     "catalog:build": "npm run build && node scripts/build-field-catalog.mjs",
     "catalog:report": "npm run build && node scripts/build-field-catalog.mjs --report",
     "lint": "tsc --noEmit --strict",

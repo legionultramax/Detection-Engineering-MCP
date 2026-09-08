@@ -29,14 +29,70 @@ interface Detection {
   false_positives: string;
 }
 
-// Search detections by keyword — uses FTS5 with LIKE fallback
+/**
+ * Columns searched, and how much a hit in each is worth.
+ *
+ * The weights encode a simple claim: a match in a structured field is better
+ * evidence than a match in free text. A rule whose *name* is "Mimikatz
+ * Execution" is a better answer for "mimikatz" than one that happens to mention
+ * it in a description, and a match on mitre_techniques for "T1059" is exact
+ * rather than incidental. search_text is the catch-all concatenation, so it is
+ * weighted lowest — almost everything matches it.
+ */
+const SEARCH_COLUMNS: Array<{ column: string; weight: number }> = [
+  { column: 'name', weight: 100 },
+  { column: 'mitre_techniques', weight: 80 },
+  { column: 'cves', weight: 80 },
+  { column: 'process_names', weight: 45 },
+  { column: 'tags', weight: 40 },
+  { column: 'analytic_stories', weight: 35 },
+  { column: 'description', weight: 30 },
+  { column: 'mitre_tactics', weight: 25 },
+  { column: 'registry_paths', weight: 20 },
+  { column: 'file_paths_found', weight: 20 },
+  { column: 'data_sources', weight: 15 },
+  { column: 'kql_keywords', weight: 15 },
+  { column: 'kql_tags', weight: 15 },
+  { column: 'kql_category', weight: 15 },
+  { column: 'platforms', weight: 5 },
+  { column: 'search_text', weight: 10 },
+];
+
+interface ScoredDetection extends Detection {
+  score: number;
+}
+
+// Substring search with relevance ranking.
+//
+// Two things this deliberately is not. It is not FTS5 — the sql.js WASM build
+// ships without it, and the previous description claimed otherwise, which meant
+// a model was told it had full-text search when it had a LIKE scan. And it no
+// longer sorts alphabetically: ORDER BY name returned the first 20 matches by
+// name, so "mimikatz" surfaced whatever sorted earliest rather than whatever
+// was most relevant.
+//
+// Multi-word queries were also broken. "%credential dumping lsass%" is a single
+// substring and matches almost nothing, so any query longer than one word
+// silently returned few or no results. Terms are now AND-ed independently and
+// their scores summed, with a bonus when the full phrase appears intact.
 const searchDetections = defineTool({
   name: 'search_detections',
-  description: 'Search security detections by keyword across name, description, tags, process names, CVEs, data sources, and more. Uses FTS5 full-text search. Supports Sigma, Splunk ESCU, Elastic, and KQL rules.',
+  description:
+    'Search detection rules by keyword across name, description, tags, MITRE techniques, CVEs, ' +
+    'process names, registry paths, data sources and more. Multi-word queries match rules ' +
+    'containing every term. Results are ranked by relevance — matches in the rule name, MITRE ' +
+    'technique or CVE rank above matches in free-text description. Substring matching, so ' +
+    '"powershell" matches "powershell.exe"; it is not stemmed or semantic, so synonyms and word ' +
+    'variants do not match. Covers Sigma, Splunk ESCU, Elastic and KQL rules.',
   inputSchema: {
     type: 'object',
     properties: {
-      query: { type: 'string', description: 'Search keyword or phrase' },
+      query: {
+        type: 'string',
+        description:
+          'Search terms. Multiple words are AND-ed: "lsass dump" returns rules mentioning both. ' +
+          'Accepts technique IDs (T1003.001) and CVE IDs directly.',
+      },
       source: { type: 'string', description: 'Filter by source: sigma, splunk_escu, elastic, kql' },
       severity: { type: 'string', description: 'Filter by severity: critical, high, medium, low' },
       limit: { type: 'number', description: 'Maximum results to return (default: 20)' },
@@ -48,47 +104,76 @@ const searchDetections = defineTool({
       query: string; source?: string; severity?: string; limit?: number
     };
 
-    const q = `%${query.toLowerCase()}%`;
+    const raw = String(query ?? '').trim();
+    if (!raw) return { error: true, message: 'No search terms provided.' };
 
-    // Multi-column LIKE search across all enriched fields
-    let sql = `SELECT id, name, description, source_type, severity, mitre_techniques
-               FROM detections
-               WHERE (
-                 search_text LIKE ? OR
-                 name LIKE ? OR
-                 description LIKE ? OR
-                 mitre_techniques LIKE ? OR
-                 mitre_tactics LIKE ? OR
-                 tags LIKE ? OR
-                 cves LIKE ? OR
-                 analytic_stories LIKE ? OR
-                 data_sources LIKE ? OR
-                 process_names LIKE ? OR
-                 file_paths_found LIKE ? OR
-                 registry_paths LIKE ? OR
-                 platforms LIKE ? OR
-                 kql_category LIKE ? OR
-                 kql_tags LIKE ? OR
-                 kql_keywords LIKE ?
-               )`;
-    const params: unknown[] = Array(16).fill(q);
+    // Terms of one or two characters match nearly every row and only add noise.
+    const terms = raw.toLowerCase().split(/\s+/).filter(t => t.length > 2);
+    const effectiveTerms = terms.length > 0 ? terms : [raw.toLowerCase()];
+    const phrase = raw.toLowerCase();
 
-    if (source) {
-      sql += ' AND source_type = ?';
-      params.push(source);
-    }
-    if (severity) {
-      sql += ' AND severity = ?';
-      params.push(severity);
+    const scoreParts: string[] = [];
+    const scoreParams: unknown[] = [];
+    const whereClauses: string[] = [];
+    const whereParams: unknown[] = [];
+
+    for (const term of effectiveTerms) {
+      const like = `%${term}%`;
+      // Score: every column hit contributes its weight, per term.
+      for (const { column, weight } of SEARCH_COLUMNS) {
+        scoreParts.push(`(CASE WHEN lower(COALESCE(${column}, '')) LIKE ? THEN ${weight} ELSE 0 END)`);
+        scoreParams.push(like);
+      }
+      // An exact name match is a different kind of answer from a substring hit.
+      scoreParts.push(`(CASE WHEN lower(COALESCE(name, '')) = ? THEN 500 ELSE 0 END)`);
+      scoreParams.push(term);
+      scoreParts.push(`(CASE WHEN lower(COALESCE(name, '')) LIKE ? THEN 60 ELSE 0 END)`);
+      scoreParams.push(`${term}%`);
+
+      // Every term must appear somewhere, or the row is not a match at all.
+      const cols = SEARCH_COLUMNS.map(c => `lower(COALESCE(${c.column}, '')) LIKE ?`).join(' OR ');
+      whereClauses.push(`(${cols})`);
+      for (const _ of SEARCH_COLUMNS) whereParams.push(like);
     }
 
-    sql += ' ORDER BY name LIMIT ?';
+    // Reward the intact phrase, so "lateral movement" outranks a rule that
+    // merely mentions both words in unrelated places.
+    if (effectiveTerms.length > 1) {
+      scoreParts.push(`(CASE WHEN lower(COALESCE(name, '')) LIKE ? THEN 250 ELSE 0 END)`);
+      scoreParams.push(`%${phrase}%`);
+      scoreParts.push(`(CASE WHEN lower(COALESCE(search_text, '')) LIKE ? THEN 80 ELSE 0 END)`);
+      scoreParams.push(`%${phrase}%`);
+    }
+
+    let sql =
+      `SELECT id, name, description, source_type, severity, mitre_techniques,
+              (${scoreParts.join(' + ')}) AS score
+       FROM detections
+       WHERE ${whereClauses.join(' AND ')}`;
+    const params: unknown[] = [...scoreParams, ...whereParams];
+
+    if (source) { sql += ' AND source_type = ?'; params.push(source); }
+    if (severity) { sql += ' AND severity = ?'; params.push(severity); }
+
+    // Severity breaks ties so that, among equally relevant rules, the more
+    // serious one is offered first.
+    sql += `
+       ORDER BY score DESC,
+                CASE lower(COALESCE(severity, ''))
+                  WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2
+                  WHEN 'low' THEN 3 ELSE 4 END,
+                name
+       LIMIT ?`;
     params.push(limit);
 
-    const results = runQuery<Detection>(sql, params);
+    const results = runQuery<ScoredDetection>(sql, params);
 
     return {
       count: results.length,
+      query: raw,
+      terms: effectiveTerms,
+      ranking: 'Relevance-scored substring match. Name, MITRE technique and CVE hits outrank ' +
+        'description hits. Not full-text search: no stemming, no synonyms.',
       detections: results.map(d => ({
         id: d.id,
         name: d.name,
@@ -96,6 +181,7 @@ const searchDetections = defineTool({
         source: d.source_type,
         severity: d.severity,
         techniques: d.mitre_techniques ? JSON.parse(d.mitre_techniques) : [],
+        score: d.score,
       })),
     };
   },
