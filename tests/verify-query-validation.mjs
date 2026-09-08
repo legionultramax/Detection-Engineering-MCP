@@ -49,7 +49,7 @@ console.log('\n=== 1. Tools are registered and reachable ===');
 {
   check('get_query_language_spec registered', mod.toolRegistry.has('get_query_language_spec'));
   check('validate_query registered', mod.toolRegistry.has('validate_query'));
-  check('registry total is 131', mod.toolRegistry.count() === 131, `got ${mod.toolRegistry.count()}`);
+  check('registry total is 132', mod.toolRegistry.count() === 132, `got ${mod.toolRegistry.count()}`);
 }
 
 console.log('\n=== 2. Specs load, and carry a real vocabulary ===');
@@ -204,6 +204,87 @@ console.log('\n=== 8. EVERY spec example passes its own validator ===');
     }
   }
   console.log(`        ${total} examples checked across 3 languages`);
+}
+
+console.log('\n=== 9. translate_detection builds a brief, not a query ===');
+{
+  // A real Sigma rule that uses the list-of-maps form, which is where field
+  // extraction previously lost three fields of four.
+  const row = conn.runQuery(
+    `SELECT id, name FROM detections
+     WHERE source_type='sigma' AND logsource_category='process_creation'
+       AND raw_content LIKE '%- Image|endswith%'
+     ORDER BY name LIMIT 1`)[0];
+  check('found a list-of-maps Sigma rule to translate', Boolean(row));
+
+  if (row) {
+    const b = await call('translate_detection', { detection_id: row.id, target_language: 'kql' });
+    check('brief returns the source rule', b.source?.id === row.id);
+    check('brief names the target table', b.target?.source === 'DeviceProcessEvents', b.target?.source);
+    check('shape resolved', b.shape === 'process_creation', b.shape);
+
+    // Regression: list-of-maps fields must not be dropped.
+    const mappedNames = (b.fieldMappings ?? []).map(f => f.sigmaField);
+    check('extracts fields written as "- Field|modifier:"',
+      mappedNames.includes('Image'), mappedNames.join(','));
+    check('extracts more than one field', mappedNames.length >= 3, mappedNames.join(','));
+
+    check('every mapping carries a confidence',
+      (b.fieldMappings ?? []).every(f => typeof f.confidence === 'string'));
+    check('every mapping carries evidence',
+      (b.fieldMappings ?? []).every(f => typeof f.evidence === 'string' && f.evidence.length > 10));
+    check('at least one mapping is corroborated',
+      (b.fieldMappings ?? []).some(f => f.confidence === 'confirmed'));
+
+    check('brief carries prohibitions', (b.target?.prohibitions ?? []).length >= 4);
+    check('brief carries shape-matched examples',
+      (b.examples ?? []).length > 0 && b.examples.every(e => e.shape === 'process_creation'));
+    check('brief instructs validation before presenting',
+      (b.instructions ?? []).some(i => /validate_query/.test(i)));
+
+    // The defining property: this tool must not answer with a query.
+    const asText = JSON.stringify(b);
+    check('brief contains no generated query field',
+      b.generatedQuery === undefined && b.result === undefined);
+    check('brief is a reasonable size', asText.length < 40000,
+      `${asText.length} bytes`);
+
+    // SPL surfaces a field with no CIM equivalent.
+    const s = await call('translate_detection', { detection_id: row.id, target_language: 'spl' });
+    const noEq = (s.fieldMappings ?? []).filter(f => f.target === null);
+    check('SPL brief reports fields with no equivalent rather than guessing',
+      noEq.length > 0 && noEq.every(f => f.confidence === 'none'),
+      JSON.stringify((s.fieldMappings ?? []).map(f => [f.sigmaField, f.target])));
+    check('cautions name the unmapped fields',
+      (s.cautions ?? []).some(c => /no .* equivalent/i.test(c)), (s.cautions ?? []).join(' | '));
+
+    // CQL cannot corroborate field names — the dictionary lists events, not columns.
+    const c2 = await call('translate_detection', { detection_id: row.id, target_language: 'cql' });
+    check('CQL mappings are graded community, not confirmed',
+      (c2.fieldMappings ?? []).filter(f => f.target).every(f => f.confidence === 'community'),
+      JSON.stringify((c2.fieldMappings ?? []).map(f => f.confidence)));
+  }
+
+  // Inline rule, not from the corpus.
+  const inline = await call('translate_detection', {
+    query: 'title: t\nlogsource:\n  category: process_creation\ndetection:\n  sel:\n    Image|endswith: \\rundll32.exe\n  condition: sel',
+    source_language: 'sigma',
+    target_language: 'kql',
+  });
+  check('accepts an inline rule', inline.shape === 'process_creation', inline.shape);
+  check('inline rule maps its field',
+    (inline.fieldMappings ?? []).some(f => f.sigmaField === 'Image'),
+    JSON.stringify((inline.fieldMappings ?? []).map(f => f.sigmaField)));
+
+  const bad = await call('translate_detection', { detection_id: 'does-not-exist', target_language: 'kql' });
+  check('unknown detection id errors clearly', bad.error === true && /not found/i.test(bad.message));
+
+  const noInput = await call('translate_detection', { target_language: 'kql' });
+  check('missing source errors clearly', noInput.error === true);
+
+  const badTarget = await call('translate_detection', { detection_id: 'x', target_language: 'aql' });
+  check('unsupported target rejected before lookup',
+    badTarget.error === true && Array.isArray(badTarget.supported));
 }
 
 conn.closeDb();

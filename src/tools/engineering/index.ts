@@ -7,6 +7,7 @@ import {
 } from '../../reference/query-languages/index.js';
 import { getFieldCatalog } from '../../reference/field-catalog/load.js';
 import { validateQuery } from './validate.js';
+import { buildTranslationBrief } from './translate.js';
 
 /** Shapes a caller can ask for, matched against a Sigma logsource category. */
 function examplesFor(lang: LanguageId, shape?: string, limit = 3) {
@@ -195,5 +196,73 @@ const validateQueryTool = defineTool({
   },
 });
 
-export const engineeringTools: ToolDefinition[] = [getQueryLanguageSpec, validateQueryTool];
+const translateDetection = defineTool({
+  name: 'translate_detection',
+  description:
+    'Build a translation brief for porting an existing detection into KQL, SPL or CQL. Retrieves ' +
+    'the real rule from the corpus and returns everything needed to translate it: the target ' +
+    'language spec, field-by-field mappings graded against the derived catalog, the Sigma ' +
+    'modifiers in use, shape-matched examples, and the prohibitions that apply. It deliberately ' +
+    'does NOT return a query — you write it from the brief, then call validate_query before ' +
+    'presenting it. Pass detection_id (from search_detections or list_by_mitre), or query plus ' +
+    'source_language for a rule you already have.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      detection_id: {
+        type: 'string',
+        description: 'Detection ID from search_detections, list_by_mitre or list_by_severity.',
+      },
+      query: {
+        type: 'string',
+        description: 'Rule text, if translating something not in the corpus. Full Sigma YAML works best.',
+      },
+      source_language: {
+        type: 'string',
+        description: 'Language of the supplied query (sigma, kql, splunk_escu, elastic). Only with query.',
+      },
+      target_language: {
+        type: 'string',
+        description: 'kql | spl | cql (aliases accepted: sentinel, splunk, crowdstrike, logscale).',
+      },
+      shape: {
+        type: 'string',
+        description:
+          'Optional logsource category hint (process_creation, network_connection, dns_query, ' +
+          'file_event, registry_event, authentication), used when the rule does not declare one.',
+      },
+    },
+    required: ['target_language'],
+  },
+  handler: async (args) => {
+    const a = args as unknown as {
+      detection_id?: string; query?: string; source_language?: string;
+      target_language: string; shape?: string;
+    };
+    const target = normaliseLanguage(a.target_language);
+    if (!target) {
+      return {
+        error: true,
+        message: `Unknown target language "${a.target_language}". Supported: ${LANGUAGE_IDS.join(', ')}.`,
+        supported: LANGUAGE_IDS,
+      };
+    }
+    if (!a.detection_id && !a.query) {
+      return {
+        error: true,
+        message: 'Provide detection_id, or query with source_language.',
+      };
+    }
+    return buildTranslationBrief(target, {
+      detectionId: a.detection_id,
+      rawQuery: a.query,
+      sourceLanguage: a.source_language,
+      shapeHint: a.shape,
+    });
+  },
+});
+
+export const engineeringTools: ToolDefinition[] = [
+  getQueryLanguageSpec, validateQueryTool, translateDetection,
+];
 export const engineeringToolCount = engineeringTools.length;

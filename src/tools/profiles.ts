@@ -50,7 +50,7 @@ export const PROFILES: Record<string, ToolProfile> = {
    * runs on a schedule rather than interactively.
    */
   'phase1-authoring': {
-    description: 'Detection hypothesis authoring — grounding tools only (24 tools)',
+    description: 'Detection hypothesis authoring — grounding tools only (25 tools)',
     include: [
       // Existing rules as grounding
       'search_detections',
@@ -95,6 +95,7 @@ export const PROFILES: Record<string, ToolProfile> = {
       // deterministic gate that must run before any query is presented.
       'get_query_language_spec',
       'validate_query',
+      'translate_detection',
     ],
   },
 
