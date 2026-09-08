@@ -56,9 +56,9 @@
 | **Correlation Engine** | ti_multi_source_ttp_lookup, ti_actor_full_profile, ti_hunt_package, ti_daily_brief *(auto-fallbacks to 15 secondary vendors — only trigger Playwright if vendor_reports_found = 0)* |
 | **Abuse.ch** | urlhaus_lookup_url/host/tag, threatfox_search_ioc/family/tag, threatfox_get_recent_iocs, bazaar_lookup_hash, bazaar_search_family/tag, bazaar_get_recent_samples, bazaar_get_imphash_siblings |
 | **OTX** | otx_pivot_ip/domain/hash/url, otx_search_actor, otx_get_pulse_iocs, otx_subscribed_feed |
-| **Vuln Intel** | nvd_cve_lookup, epss_score_lookup, epss_bulk_check, check_cisa_kev |
-| **Malware Research** | malpedia_search, malpedia_actor_profile, malpedia_family_profile, anyrun_trending |
-| **LOL / IOC** | lookup_lolbas, list_lolbas, analyze_ioc, misp_warninglist_check |
+| **Vuln Intel** | check_cisa_kev, list_by_cve |
+| **Govt Advisories** | cisa_search_advisories, govt_joint_advisory_search |
+| **LOL / IOC** | lookup_lolbas, list_lolbas, analyze_ioc, get_threat_profile |
 | **LOLFarm** | **get_lolfarm_context** *(call with `mode="summary"` first — ~500 tokens; escalate to `detailed` only if authoring depends on full data)*, then per-source deep-dives: lookup_loldriver, lookup_hijacklib, lookup_lolrmm, lookup_lofp, lookup_wadcom, lookup_lots_domain, lookup_malapi, search_lolfarm, list_loldrivers, list_lolrmm, list_hijacklibs. **sync_lolfarm** runs weekly via scheduled task — do not call manually unless data is suspected stale. |
 | **Rule Conversion** *(drafts only — always refine)* | cve_to_detection, convert_yara_to_sigma, convert_sigma_to_kql |
 | **Knowledge Graph** | create_entity, search_entities, create_relation, get_knowledge_summary, log_decision, get_decisions, add_learning, get_learnings |
@@ -79,17 +79,34 @@ Trigger only when correlation engine returns `vendor_reports_found = 0` after fu
 ### BANNED — never use
 `*_search_reports`, `*_fetch_report`, `ti_report_ingest` — all deprecated. Use Playwright instead.
 
+### NOT IMPLEMENTED — documented but absent from the server
+These appear in this repo's README and in earlier revisions of this guide, but **no such
+tools are registered**. Calling them returns "Unknown tool". Verified against
+`src/tools/**` — the server registers **102** tools, not the 122 the README badge claims.
+
+| Absent tool | Capability | Substitute |
+|---|---|---|
+| `nvd_cve_lookup` | CVE detail lookup | `list_by_cve` for local rule coverage; Playwright for CVE detail |
+| `epss_score_lookup`, `epss_bulk_check` | EPSS exploit-probability scoring | **none** — EPSS cannot be checked; do not claim it was |
+| `misp_warninglist_check` | IOC false-positive screening | **none** — screen IOCs manually before pivoting |
+| `malpedia_search`, `malpedia_actor_profile`, `malpedia_family_profile` | Malware family/actor profiles | `get_software`, `search_software`, `ti_actor_full_profile` |
+| `anyrun_trending` | Trending sandbox submissions | `bazaar_get_recent_samples`, `threatfox_get_recent_iocs` |
+| `get_top_gaps`, `get_coverage_summary` | *(these DO exist — use them)* | — |
+
+Never state that an EPSS score or MISP screening was checked. If the capability is
+required, say it is unavailable rather than substituting a guess from training data.
+
 ---
 
 ## WAT PIPELINE
 
 **WAT-00 Classify** — Determine mode. Resolve actor aliases via search_threat_groups(). Check browser state.
 **WAT-01 Recall** — search_entities + get_learnings + get_decisions. Full hit (<72h) = skip WAT-10/11/20/21.
-**WAT-10 Actor Intel** — get_threat_group + malpedia_actor_profile + ti_actor_full_profile → extract ordered_ttp_chain, malware_artifacts, dwell_time. Empty vendor data → WAT-20. Deep: add get_software, list_campaigns, get_mitigations per technique.
+**WAT-10 Actor Intel** — get_threat_group + ti_actor_full_profile + get_software_using_technique → extract ordered_ttp_chain, malware_artifacts, dwell_time. Empty vendor data → WAT-20. Deep: add get_software, list_campaigns, get_mitigations per technique.
 **WAT-11 Technique Intel** — lookup_mitre_technique + get_groups_using_technique + get_software_using_technique + get_data_sources + get_mitigations + ti_multi_source_ttp_lookup. vendor_reports_found=0 → WAT-20.
-**WAT-12 CVE Intel** *(Standard/Deep)* — nvd_cve_lookup + epss_score_lookup + check_cisa_kev in parallel. Playwright mandatory when CVSS ≥ 8.0 or KEV = yes.
+**WAT-12 CVE Intel** *(Standard/Deep)* — check_cisa_kev + list_by_cve in parallel. No NVD or EPSS tool exists (see NOT IMPLEMENTED), so CVSS and EPSS must come from Playwright — mandatory when KEV = yes, or when severity is unknown.
 **WAT-20 Web Research** *(Standard/Deep)* — Playwright + DuckDuckGo per Tier 2 sequence. Always run when correlation engine returned empty.
-**WAT-21 IOC Enrichment** — misp_warninglist_check FIRST. Then threatfox + bazaar + otx_pivot + urlhaus in parallel. High-value: bazaar_get_imphash_siblings.
+**WAT-21 IOC Enrichment** — no warninglist tool exists, so screen obvious benign infrastructure (CDNs, cloud egress, telemetry endpoints) by inspection first. Then threatfox + bazaar + otx_pivot + urlhaus in parallel. High-value: bazaar_get_imphash_siblings.
 **WAT-30 Coverage Audit** — list_by_mitre(parent + sub) + search_detections per technique. Classify: COVERED / PARTIAL / GAP.
 **WAT-31 Gap Analysis** — identify_gaps() as baseline only. Manual per-TID check via list_by_mitre. Generic rules = PARTIAL. Priority: CRITICAL > HIGH > MEDIUM > LOW.
 **WAT-40 Query Reference** — Collect best existing rules via search_detections + get_detection + lookup_lolbas. Input for WAT-42, not the deliverable.
@@ -104,7 +121,7 @@ Trigger only when correlation engine returns `vendor_reports_found = 0` after fu
 | **HUNT-TECHNIQUE** | WAT-00→01→11→20→30→31→40→41→42(if chain)→50 |
 | **ANALYZE-CVE** | WAT-00→01→12→20→30→31→40→41→42→50 |
 | **INGEST-ADVISORY** | → invoke **advisory-ingest** skill directly |
-| **DAILY-BRIEF** | anyrun_trending + threatfox_get_recent_iocs + bazaar_get_recent_samples → Playwright → WAT-50 |
+| **DAILY-BRIEF** | ti_daily_brief + threatfox_get_recent_iocs + bazaar_get_recent_samples → Playwright → WAT-50 |
 
 ---
 
@@ -136,11 +153,11 @@ Trigger only when correlation engine returns `vendor_reports_found = 0` after fu
 - Every atomic rule scores ≥ 3/5 on all 5 dimensions
 - Kill-chain query scores ≥ 3/5 on Sequence + Entity + Window
 - Playwright run if any vendor data returned empty
-- EPSS + KEV checked for any CVE
+- KEV checked for any CVE via check_cisa_kev (EPSS has no tool — source it via Playwright or state it as unavailable)
 - Binary-scoped rules: abuse matrix covering ALL known patterns before writing query
 
 **Non-blocking — best effort:**
-- MISP warninglist checked for domain/IP IOCs before pivoting
+- Domain/IP IOCs screened for benign infrastructure before pivoting (no warninglist tool — by inspection)
 - Data source requirements stated per phase
 - FP considerations documented per phase (not global)
 - New findings persisted to Knowledge Graph
@@ -153,7 +170,7 @@ Trigger only when correlation engine returns `vendor_reports_found = 0` after fu
 - Present a single atomic rule as final output for Standard/Deep hunts
 - Stop at WAT-40 without WAT-42 synthesis in Standard/Deep mode
 - Accept empty vendor_reports without Playwright supplement
-- Skip misp_warninglist_check before IOC pivoting
+- Claim an EPSS score or MISP screening was performed — neither tool exists on this server
 - Hardcode IOC values inside detection rule logic
 - Deploy rules with composite score < 3.0
 - Use identify_gaps() alone for actor-specific hunts (too generic)
