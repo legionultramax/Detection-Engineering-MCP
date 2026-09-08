@@ -16,55 +16,78 @@ import {
 import { handleToolCall, listTools } from './handlers/tools.js';
 import { listPrompts, getPrompt } from './handlers/prompts.js';
 import { listResources, listResourceTemplates, readResource } from './handlers/resources.js';
+import {
+  toolRegistry,
+  detectionTools,
+  threatIntelTools,
+  knowledgeTools,
+  mitreAttackTools,
+  atomicRedTeamTools,
+  coverageEngineTools,
+  reportGeneratorTools,
+  sublimeTools,
+  lolfarmTools,
+} from './tools/index.js';
+import type { ToolDefinition } from './tools/index.js';
 
 const SERVER_VERSION = '1.0.0';
 
-const SERVER_INSTRUCTIONS = `# Harris HawkEye MCP
+// Server instructions are generated from the live tool registry rather than
+// hand-maintained. A hardcoded list drifts the moment a tool is added, renamed,
+// or dropped — and advertising a tool that does not exist causes models to emit
+// calls that fail with "Unknown tool". Names are filtered through the registry
+// so only genuinely callable tools can ever appear here.
+function buildServerInstructions(): string {
+  const categories: Array<{ label: string; tools: ToolDefinition[] }> = [
+    { label: 'Detection Search & Analysis', tools: detectionTools },
+    { label: 'Threat Intelligence', tools: threatIntelTools },
+    { label: 'MITRE ATT&CK', tools: mitreAttackTools },
+    { label: 'Atomic Red Team', tools: atomicRedTeamTools },
+    { label: 'Coverage Engine', tools: coverageEngineTools },
+    { label: 'LOLFarm (Living Off The Land)', tools: lolfarmTools },
+    { label: 'Knowledge Graph', tools: knowledgeTools },
+    { label: 'Sublime Security (Email)', tools: sublimeTools },
+    { label: 'Reporting', tools: reportGeneratorTools },
+  ];
 
-## Tool Categories
+  const sections: string[] = [];
+  let total = 0;
 
-### Detection Search & Management (20+ tools)
-- search_detections, get_detection, list_detections
-- list_by_mitre, list_by_severity, list_by_source
-- analyze_coverage, identify_gaps, suggest_detections
+  for (const { label, tools } of categories) {
+    const names = tools
+      .map(t => t.name)
+      .filter(name => toolRegistry.has(name))
+      .sort();
+    if (names.length === 0) continue;
+    total += names.length;
+    sections.push(`### ${label} (${names.length})\n${names.join(', ')}`);
+  }
 
-### Threat Intelligence (15+ tools)
-- lookup_mitre_technique, lookup_mitre_tactic
-- lookup_cve, search_nvd
-- check_cisa_kev, get_kev_list
-- lookup_lolbas, lookup_gtfobins
-- search_malware_bazaar, check_ioc
-
-### Knowledge Graph (Tribal Knowledge)
-- create_entity, create_relation
-- log_decision, add_learning
-- search_knowledge, get_decisions
-
-### Detection Engineering
-- validate_sigma, convert_sigma
-- analyze_detection_quality
-- generate_detection_template
-
-### Cache & Storage
-- cache_result, get_cached, clear_cache
-- create_table, query_table
-
-## Data Sources
-- MITRE ATT&CK Framework
-- National Vulnerability Database (NVD)
-- CISA Known Exploited Vulnerabilities (KEV)
-- LOLBAS (Living Off The Land Binaries)
-- GTFOBins
-- Sigma Rules
-- Splunk Enterprise Security Content Updates (ESCU)
-- Elastic Detection Rules
-- Microsoft KQL/Sentinel Rules
-
-## Quick Start
-1. get_stats() - See detection inventory
-2. lookup_mitre_technique("T1059") - Research technique
-3. search_detections("powershell execution") - Find detections
-4. analyze_coverage() - Get MITRE coverage analysis`;
+  return [
+    '# Harris HawkEye MCP',
+    '',
+    `Detection engineering and threat intelligence server exposing ${total} tools.`,
+    'Only the tools listed below exist. Do not call a tool that is not named here.',
+    '',
+    '## Tools by category',
+    '',
+    ...sections,
+    '',
+    '## Data sources',
+    '- Detection rules: SigmaHQ, Splunk ESCU, Elastic, Azure Sentinel (KQL), Sublime Security',
+    '- MITRE ATT&CK: techniques, groups, software, campaigns, mitigations, data sources',
+    '- Atomic Red Team adversary simulation tests',
+    '- LOLBAS and LOLFarm: LOLDrivers, HijackLibs, LOLRMM, LoFP, WADComs, LOTS, MalAPI',
+    '- Threat intel: abuse.ch, AlienVault OTX, NVD/EPSS, CISA KEV, Malpedia, government CERT advisories',
+    '',
+    '## Suggested starting points',
+    '- get_stats() — current detection inventory',
+    '- search_detections("<keywords>") — full-text search across all rule sources',
+    '- list_by_mitre("T1059.001") — existing coverage for a technique',
+    '- lookup_mitre_technique("T1059.001") — technique detail, data sources, detection guidance',
+    '- get_lolfarm_context("T1059.001") — living-off-the-land context for a technique',
+  ].join('\n');
+}
 
 // Global server instance
 let serverInstance: Server | null = null;
@@ -102,7 +125,7 @@ export function createServer(): Server {
         resources: { subscribe: true, listChanged: true },
         completions: {},
       },
-      instructions: SERVER_INSTRUCTIONS,
+      instructions: buildServerInstructions(),
     }
   );
 

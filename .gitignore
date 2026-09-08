@@ -64,3 +64,6 @@ client-profiles/
 # Generated outputs / working artifacts
 navigator-layers/
 *.docx
+
+# Claude Code local overrides (per-developer, contains local paths/permissions)
+.claude/settings.local.json
