@@ -14,6 +14,7 @@ import { coverageEngineTools, coverageEngineToolCount } from './coverage-engine/
 import { reportGeneratorTools, reportGeneratorToolCount } from './report-generator/index.js';
 import { sublimeTools, sublimeToolCount } from './sublime/index.js';
 import { lolfarmTools, lolfarmToolCount } from './lolfarm/index.js';
+import { engineeringTools, engineeringToolCount } from './engineering/index.js';
 
 import { toolRegistry } from './registry.js';
 
@@ -27,6 +28,7 @@ export { coverageEngineTools, coverageEngineToolCount } from './coverage-engine/
 export { reportGeneratorTools, reportGeneratorToolCount } from './report-generator/index.js';
 export { sublimeTools, sublimeToolCount } from './sublime/index.js';
 export { lolfarmTools, lolfarmToolCount } from './lolfarm/index.js';
+export { engineeringTools, engineeringToolCount } from './engineering/index.js';
 
 export function registerAllTools(): void {
   // Register all tool modules
@@ -39,6 +41,7 @@ export function registerAllTools(): void {
   toolRegistry.registerAll(reportGeneratorTools);
   toolRegistry.registerAll(sublimeTools);
   toolRegistry.registerAll(lolfarmTools);
+  toolRegistry.registerAll(engineeringTools);
 
   console.error(`[tools] Registry initialized with ${toolRegistry.count()} tools`);
   console.error(`[tools] - Detections: ${detectionToolCount}`);
@@ -50,6 +53,7 @@ export function registerAllTools(): void {
   console.error(`[tools] - Report Generator: ${reportGeneratorToolCount}`);
   console.error(`[tools] - Sublime Security: ${sublimeToolCount}`);
   console.error(`[tools] - LOLFarm: ${lolfarmToolCount}`);
+  console.error(`[tools] - Query Engineering: ${engineeringToolCount}`);
 }
 
 export function getToolsSummary(): { total: number; names: string[]; threat_intel: number; byModule: Record<string, number> } {
@@ -67,6 +71,7 @@ export function getToolsSummary(): { total: number; names: string[]; threat_inte
       report_generator: reportGeneratorToolCount,
       sublime: sublimeToolCount,
       lolfarm: lolfarmToolCount,
+      engineering: engineeringToolCount,
     },
   };
 }

@@ -170,8 +170,8 @@ console.log('\n=== 1. Read-only with no profile withholds only the 8 write tools
     const instr = init.result?.instructions ?? '';
     const tools = await c.list();
     const names = tools.map(t => t.name);
-    check('tools/list returns 121 (129 minus 8 writes)', names.length === 121, `got ${names.length}`);
-    check('instructions advertise 121 tools', instr.includes('exposing 121 tools'), instr.slice(0, 110));
+    check('tools/list returns 123 (131 minus 8 writes)', names.length === 123, `got ${names.length}`);
+    check('instructions advertise 123 tools', instr.includes('exposing 123 tools'), instr.slice(0, 110));
     check('knowledge write withheld', !names.includes('create_entity'));
     check('knowledge read kept', names.includes('search_entities'));
     check('sync withheld', !names.includes('sync_lolfarm'));
@@ -271,13 +271,13 @@ console.log('\n=== 3. Stage 2: phase1-authoring profile ===');
     const tools = await c.list();
     const names = tools.map(t => t.name);
 
-    check('tools/list returns exactly 22', names.length === 22, `got ${names.length}`);
+    check('tools/list returns exactly 24', names.length === 24, `got ${names.length}`);
     check('in-profile tool present', names.includes('search_detections'));
     check('out-of-profile tool absent', !names.includes('ti_daily_brief'));
     check('report generator excluded', !names.includes('generate_hunt_report'));
     check('knowledge writes excluded', !names.includes('create_entity'));
 
-    check('instructions advertise 22 tools', instr.includes('exposing 22 tools'), instr.slice(0, 110));
+    check('instructions advertise 24 tools', instr.includes('exposing 24 tools'), instr.slice(0, 110));
     check('instructions carry scoped notice', instr.includes('scoped tool profile'));
     check('instructions omit excluded names', !instr.includes('ti_daily_brief'));
 
@@ -296,7 +296,7 @@ console.log('\n=== 3. Stage 2: phase1-authoring profile ===');
   c.kill();
   await c.exited;
   check('profile logged at startup', c.err.includes('Tool profile "phase1-authoring" active'));
-  check('profile reports 22 of 129', c.err.includes('22 of 129 tools exposed'));
+  check('profile reports 24 of 131', c.err.includes('24 of 131 tools exposed'));
 }
 
 console.log('\n=== 4. research profile excludes writes, keeps reads ===');
@@ -307,7 +307,7 @@ console.log('\n=== 4. research profile excludes writes, keeps reads ===');
   try {
     await c.handshake();
     const names = (await c.list()).map(t => t.name);
-    check('exposes 121 tools (129 minus 8 writes)', names.length === 121, `got ${names.length}`);
+    check('exposes 123 tools (131 minus 8 writes)', names.length === 123, `got ${names.length}`);
     check('write tool excluded', !names.includes('create_entity'));
     check('read counterpart kept', names.includes('search_entities'));
     check('sync excluded', !names.includes('sync_lolfarm'));
@@ -354,7 +354,7 @@ console.log('\n=== 7. Default writable mode with HAWKEYE_SKIP_SYNC ===');
   try {
     const init = await c.handshake();
     const tools = await c.list();
-    check('writable mode exposes all 129 tools', tools.length === 129, `got ${tools.length}`);
+    check('writable mode exposes all 131 tools', tools.length === 131, `got ${tools.length}`);
     check('no scoped notice in writable default', !(init.result?.instructions ?? '').includes('scoped tool profile'));
     const w = await c.call(3, 'create_entity', {
       name: 'skip-sync-probe', entity_type: 'test', observations: ['writable'],

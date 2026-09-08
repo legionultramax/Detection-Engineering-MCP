@@ -50,7 +50,7 @@ export const PROFILES: Record<string, ToolProfile> = {
    * runs on a schedule rather than interactively.
    */
   'phase1-authoring': {
-    description: 'Detection hypothesis authoring — grounding tools only (22 tools)',
+    description: 'Detection hypothesis authoring — grounding tools only (24 tools)',
     include: [
       // Existing rules as grounding
       'search_detections',
@@ -90,6 +90,11 @@ export const PROFILES: Record<string, ToolProfile> = {
       'check_cisa_kev',
       // Translation grounding
       'convert_sigma_to_kql',
+      // Query-language authoring. get_query_language_spec supplies the target
+      // language's vocabulary and prohibitions; validate_query is the
+      // deterministic gate that must run before any query is presented.
+      'get_query_language_spec',
+      'validate_query',
     ],
   },
 

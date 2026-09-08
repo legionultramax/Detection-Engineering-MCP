@@ -2,18 +2,18 @@
 
 **Detection Engineering Command Center for Claude Code**
 
-A Model Context Protocol (MCP) server purpose-built for detection engineers. Indexes 13,900+ detection rules from four major detection ecosystems (Sigma, KQL/Sentinel, Splunk ESCU, Elastic), enriches them with MITRE ATT&CK v18.1, Atomic Red Team, LOLBAS, LOLFarm (lolol.farm), and 15+ threat intelligence sources — then exposes everything through 129 tools and 15 project-scoped Claude Code skills that implement the full detection engineering lifecycle.
+A Model Context Protocol (MCP) server purpose-built for detection engineers. Indexes 13,900+ detection rules from four major detection ecosystems (Sigma, KQL/Sentinel, Splunk ESCU, Elastic), enriches them with MITRE ATT&CK v18.1, Atomic Red Team, LOLBAS, LOLFarm (lolol.farm), and 15+ threat intelligence sources — then exposes everything through 131 tools and 15 project-scoped Claude Code skills that implement the full detection engineering lifecycle.
 
 The primary output is **kill-chain correlated queries** (KQL + SPL + Sigma), not isolated atomic rules.
 
-![Tools](https://img.shields.io/badge/Tools-129-blue)
-![Skills](https://img.shields.io/badge/Skills-8-green)
-![Detections](https://img.shields.io/badge/Detections-12%2C810-orange)
+![Tools](https://img.shields.io/badge/Tools-131-blue)
+![Skills](https://img.shields.io/badge/Skills-15-green)
+![Detections](https://img.shields.io/badge/Detections-13%2C942-orange)
 ![MITRE](https://img.shields.io/badge/MITRE_ATT%26CK-v18.1-red)
-![Techniques](https://img.shields.io/badge/Technique_Coverage-602%2F835_(72.1%25)-brightgreen)
-![ART](https://img.shields.io/badge/Atomic_Red_Team-1770_tests-yellow)
+![Techniques](https://img.shields.io/badge/Technique_Coverage-596%2F835_(71.3%25)-brightgreen)
+![ART](https://img.shields.io/badge/Atomic_Red_Team-not_indexed-lightgrey)
 ![TI Sources](https://img.shields.io/badge/TI_Sources-15+-purple)
-![LOLFarm](https://img.shields.io/badge/LOLFarm-7_sources-ff69b4)
+![LOLFarm](https://img.shields.io/badge/LOLFarm-not_indexed-lightgrey)
 
 ---
 
@@ -21,10 +21,10 @@ The primary output is **kill-chain correlated queries** (KQL + SPL + Sigma), not
 
 | Capability | Description |
 |---|---|
-| **Multi-source detection search** | Query 12,810 rules (KQL 5,051 · Sigma 3,108 · Splunk ESCU 1,966 · Elastic 1,689 · Sublime 996) from one interface |
+| **Multi-source detection search** | Query 13,942 rules (KQL 5,509 · Sigma 4,030 · Elastic 2,218 · Splunk ESCU 2,185) plus 365 Splunk analytic stories, from one interface |
 | **MITRE ATT&CK enrichment** | 835 techniques, 187 groups, 787 software, 52 campaigns, 20,048 relationships — all local, all queryable |
-| **Atomic Red Team validation** | 1,770 adversary simulation tests cross-referenced against your detection rules for coverage gaps |
-| **LOLFarm intelligence** | Aggregated Living-Off-The-Land data from 7 sources: LOLDrivers, HijackLibs, LOLRMM, LoFP, WADComs, LOTS, MalAPI |
+| **Atomic Red Team validation** | Indexes and cross-references Atomic Red Team tests against detection rules. **Not currently populated** — run the ART sync to enable the 7 ART tools |
+| **LOLFarm intelligence** | Aggregates Living-Off-The-Land data from 7 sources: LOLDrivers, HijackLibs, LOLRMM, LoFP, WADComs, LOTS, MalAPI. **Not currently populated** — run `sync_lolfarm` to enable the 13 LOLFarm tools |
 | **LOLBAS hard gate** | Every binary-scoped rule must enumerate all known abuse patterns before a single condition is written |
 | **Threat intelligence** | 15+ sources: abuse.ch (URLhaus, ThreatFox, MalwareBazaar), AlienVault OTX, CISA/FBI/NSA/NCSC-UK/CERT-EU, Malpedia, NVD/EPSS, ANY.RUN |
 | **CVE-to-detection** | Input a CVE ID → get KQL, SPL, and Sigma rules with EPSS scores and KEV status |
@@ -63,10 +63,10 @@ The primary output is **kill-chain correlated queries** (KQL + SPL + Sigma), not
                     └──────────────────┬──────────────────────┘
                                        │
                     ┌──────────────────▼──────────────────────┐
-                    │     SQLite (sql.js WASM) — 97 MB DB      │
+                    │     SQLite (sql.js WASM) — ~120 MB DB      │
                     │                                          │
-                    │  12,810 detections │ 835 techniques       │
-                    │  1,770 ART tests   │ 138 telemetry maps   │
+                    │  13,942 detections │ 835 techniques       │
+                    │  365 stories       │ 138 telemetry maps   │
                     │  LOLFarm 7 tables  │ Knowledge graph      │
                     └─────────────────────────────────────────┘
 ```
