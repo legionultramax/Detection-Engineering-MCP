@@ -1,0 +1,45 @@
+---
+description: Detection and Story creation templates for multiple SIEM platforms
+alwaysApply: true
+---
+
+# Detection Templates
+
+## Validation
+
+Always validate before committing:
+- **Splunk**: `contentctl validate` (activate venv first)
+- **Sigma**: `sigma check rule.yml` or use pySigma
+- **Elastic**: detection engine built-in validation
+
+## Splunk Detection YAML
+
+Write to: `$SECURITY_CONTENT_PATH/detections/<kind>/<name>.yml`
+
+Key rules:
+- `rba:` section is top-level (NOT inside tags)
+- Filter macro: `snake_case(detection_name)_filter`
+- Data source names must match `data_sources/*.yml` entries exactly
+- File name must be snake_case of the `name` field
+
+## Sigma Rule
+
+Standard YAML with: title, id, status, level, description, logsource, detection, falsepositives, tags (attack.tactic, attack.tXXXX.XXX).
+
+## KQL Analytics Rule (Sentinel)
+
+Write KQL with comment headers for title and MITRE mapping. Use DeviceProcessEvents, SigninLogs, etc. For programmatic deployment, wrap in YAML with `queryFrequency`, `severity`, `tactics`, `relevantTechniques`, and `entityMappings`.
+
+## Elastic Security Rule (TOML)
+
+Elastic rules use TOML format with `[metadata]`, `[rule]`, and `[[rule.threat]]` sections. Set `type = "eql"` for EQL queries or `type = "query"` for KQL/Lucene. Always include `[[rule.threat.technique]]` and `[rule.threat.tactic]` blocks for MITRE mappings.
+
+## Story Template (Splunk)
+
+Stories must be CONCISE: 17-19 lines total. Description 3-5 sentences, narrative 5-8 sentences.
+
+## Reference Lists
+
+Detection Types: TTP, Anomaly, Hunting, Baseline, Correlation
+Security Domains: endpoint, network, threat, identity, access, audit, cloud
+Asset Types: Endpoint, Network, Cloud Instance, AWS Account, Azure Tenant, etc.

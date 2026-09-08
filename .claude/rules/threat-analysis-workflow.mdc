@@ -1,0 +1,63 @@
+---
+alwaysApply: false
+---
+
+# Threat Analysis Workflow
+
+## File Output Rules
+
+ONLY CREATE ONE FILE when asked for threat analysis, gap analysis, or coverage reports.
+- Name it: `<THREAT-NAME>-DETECTION-COVERAGE-REPORT.md`
+- Update that ONE file as work progresses
+- NEVER create separate files for testing guides, atomic deployment, validation results
+- Everything goes in the ONE consolidated report
+
+## Standard Workflow
+
+1. **Read Skills FIRST** - Check `.claude/skills/` for established workflows
+2. **Check MCP** - Query `security-detections` MCP for existing coverage
+3. **Create ONE Report** - Single markdown file with all findings
+4. **Create Detections** - Write rule files to the appropriate directory
+5. **Deploy Atomics** - Add to deployment playbook, NOT separate files
+
+## Environment Paths
+
+All paths come from environment variables. See `agents/.env.example` for the full list:
+- `$SIEM_PLATFORM` - Target SIEM: `splunk`, `sentinel`, `elastic`, `sigma`
+- `$SECURITY_CONTENT_PATH` - Detection content repository
+- `$ATTACK_RANGE_PATH` - Attack Range installation (Splunk) or lab path
+- `$ATTACK_RANGE_VENV` - Poetry venv activate script (if using Attack Range)
+- `$CUSTOM_ATOMICS_PATH` - Path to custom atomic tests (T9999.XXX)
+
+## Custom Atomic Tests
+
+Use T9999.00X numbering for custom atomics (T9999.001, T9999.002, etc.)
+
+Deployment workflow (adapt to your `$SIEM_PLATFORM` lab):
+1. Add test YAML to `$CUSTOM_ATOMICS_PATH/T9999.00X/`
+2. Deploy to target via Ansible, SCP, or Attack Range
+3. Execute on target (Invoke-AtomicTest or goart)
+4. Validate telemetry in your SIEM:
+   - **Splunk:** `splunk-mcp:run_detection` or manual SPL search
+   - **Sentinel:** Run KQL in Log Analytics / Advanced Hunting
+   - **Elastic:** Check in Security → Detections or Discover
+
+## Report Structure
+
+```markdown
+# <THREAT-NAME> - Detection Coverage Report
+
+**Date:** YYYY-MM-DD | **Source:** URL
+
+## Executive Summary
+X techniques identified, Y% existing coverage, Z new detections created
+
+## Gap Analysis
+| Technique | Existing Coverage | Gap | Priority |
+
+## New Detections Created
+1. detection_name.yml - T1xxx
+
+## Atomic Tests & Validation
+Results from testing and Splunk/Sentinel/Elastic validation
+```
