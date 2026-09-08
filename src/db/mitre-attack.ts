@@ -1,7 +1,7 @@
 // MITRE ATT&CK STIX Database Schema and Parser
 import { createGunzip } from 'zlib';
 import { createReadStream, existsSync } from 'fs';
-import { runStatement, runBulkStatement, runQuery, getDb, saveDb } from './connection.js';
+import { runSchemaStatement, runBulkStatement, runQuery, getDb, saveDb } from './connection.js';
 
 // STIX Object Interfaces
 interface STIXObject {
@@ -48,7 +48,7 @@ interface STIXBundle {
 // Initialize MITRE ATT&CK tables
 export function initMitreAttackTables(): void {
   // Threat Groups (intrusion-set)
-  runStatement(`
+  runSchemaStatement(`
     CREATE TABLE IF NOT EXISTS mitre_groups (
       id TEXT PRIMARY KEY,
       stix_id TEXT UNIQUE,
@@ -64,7 +64,7 @@ export function initMitreAttackTables(): void {
   `);
 
   // Software - Malware
-  runStatement(`
+  runSchemaStatement(`
     CREATE TABLE IF NOT EXISTS mitre_malware (
       id TEXT PRIMARY KEY,
       stix_id TEXT UNIQUE,
@@ -81,7 +81,7 @@ export function initMitreAttackTables(): void {
   `);
 
   // Software - Tools
-  runStatement(`
+  runSchemaStatement(`
     CREATE TABLE IF NOT EXISTS mitre_tools (
       id TEXT PRIMARY KEY,
       stix_id TEXT UNIQUE,
@@ -98,7 +98,7 @@ export function initMitreAttackTables(): void {
   `);
 
   // Campaigns
-  runStatement(`
+  runSchemaStatement(`
     CREATE TABLE IF NOT EXISTS mitre_campaigns (
       id TEXT PRIMARY KEY,
       stix_id TEXT UNIQUE,
@@ -116,7 +116,7 @@ export function initMitreAttackTables(): void {
   `);
 
   // Mitigations (course-of-action)
-  runStatement(`
+  runSchemaStatement(`
     CREATE TABLE IF NOT EXISTS mitre_mitigations (
       id TEXT PRIMARY KEY,
       stix_id TEXT UNIQUE,
@@ -131,7 +131,7 @@ export function initMitreAttackTables(): void {
   `);
 
   // Data Sources
-  runStatement(`
+  runSchemaStatement(`
     CREATE TABLE IF NOT EXISTS mitre_data_sources (
       id TEXT PRIMARY KEY,
       stix_id TEXT UNIQUE,
@@ -148,7 +148,7 @@ export function initMitreAttackTables(): void {
   `);
 
   // Data Components
-  runStatement(`
+  runSchemaStatement(`
     CREATE TABLE IF NOT EXISTS mitre_data_components (
       id TEXT PRIMARY KEY,
       stix_id TEXT UNIQUE,
@@ -164,7 +164,7 @@ export function initMitreAttackTables(): void {
   `);
 
   // Techniques (attack-pattern) - enhanced version
-  runStatement(`
+  runSchemaStatement(`
     CREATE TABLE IF NOT EXISTS mitre_techniques_full (
       id TEXT PRIMARY KEY,
       stix_id TEXT UNIQUE,
@@ -184,7 +184,7 @@ export function initMitreAttackTables(): void {
   `);
 
   // Relationships (the glue)
-  runStatement(`
+  runSchemaStatement(`
     CREATE TABLE IF NOT EXISTS mitre_relationships (
       id TEXT PRIMARY KEY,
       stix_id TEXT UNIQUE,
@@ -198,13 +198,13 @@ export function initMitreAttackTables(): void {
   `);
 
   // Create indexes for fast lookups
-  runStatement(`CREATE INDEX IF NOT EXISTS idx_mitre_rel_source ON mitre_relationships(source_ref)`);
-  runStatement(`CREATE INDEX IF NOT EXISTS idx_mitre_rel_target ON mitre_relationships(target_ref)`);
-  runStatement(`CREATE INDEX IF NOT EXISTS idx_mitre_rel_type ON mitre_relationships(relationship_type)`);
-  runStatement(`CREATE INDEX IF NOT EXISTS idx_mitre_groups_name ON mitre_groups(name)`);
-  runStatement(`CREATE INDEX IF NOT EXISTS idx_mitre_malware_name ON mitre_malware(name)`);
-  runStatement(`CREATE INDEX IF NOT EXISTS idx_mitre_tools_name ON mitre_tools(name)`);
-  runStatement(`CREATE INDEX IF NOT EXISTS idx_mitre_techniques_extid ON mitre_techniques_full(external_id)`);
+  runSchemaStatement(`CREATE INDEX IF NOT EXISTS idx_mitre_rel_source ON mitre_relationships(source_ref)`);
+  runSchemaStatement(`CREATE INDEX IF NOT EXISTS idx_mitre_rel_target ON mitre_relationships(target_ref)`);
+  runSchemaStatement(`CREATE INDEX IF NOT EXISTS idx_mitre_rel_type ON mitre_relationships(relationship_type)`);
+  runSchemaStatement(`CREATE INDEX IF NOT EXISTS idx_mitre_groups_name ON mitre_groups(name)`);
+  runSchemaStatement(`CREATE INDEX IF NOT EXISTS idx_mitre_malware_name ON mitre_malware(name)`);
+  runSchemaStatement(`CREATE INDEX IF NOT EXISTS idx_mitre_tools_name ON mitre_tools(name)`);
+  runSchemaStatement(`CREATE INDEX IF NOT EXISTS idx_mitre_techniques_extid ON mitre_techniques_full(external_id)`);
 }
 
 // Helper to extract external ID (e.g., G0001, S0001, T1059)

@@ -1,6 +1,7 @@
 # Harris HawkEye MCP — Operations Guide v8
 
-> **12,769 detections** (KQL 5,051 · Sigma 3,108 · Splunk 1,966 · Elastic 1,689 · Sublime 955)
+> **13,942 detections** (KQL 5,509 · Sigma 4,030 · Elastic 2,218 · Splunk 2,185 · Sublime 0)
+> **596 techniques covered** · **365 analytic stories**
 > **835 techniques** | **187 groups** | **696 malware** | **52 campaigns** | **268 mitigations**
 > **Primary output = kill-chain correlated queries (KQL + SPL + Sigma), not atomic rules.**
 

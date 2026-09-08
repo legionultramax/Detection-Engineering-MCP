@@ -640,7 +640,7 @@ function indexStories(basePath: string): number {
       
       runBulkStatement(
         `INSERT OR REPLACE INTO stories 
-         (id, name, description, narrative, source_type, detection_ids, mitre_tactics, mitre_techniques, tags, references, file_path)
+         (id, name, description, narrative, source_type, detection_ids, mitre_tactics, mitre_techniques, tags, refs, file_path)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           id,

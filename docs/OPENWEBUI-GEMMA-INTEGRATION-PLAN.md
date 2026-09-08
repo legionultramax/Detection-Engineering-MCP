@@ -1,5 +1,17 @@
 # Harris HawkEye MCP — Open WebUI / Gemma-4-26B-A4B Integration Plan
 
+> **SUPERSEDED.** Written before the downstream execution contract was known, and kept only for
+> the environment details below, which remain accurate.
+>
+> Three things in it are wrong and were corrected elsewhere. Phase 5 places pipeline run state in
+> this repo's SQLite; run state belongs to whatever system executes the queries, not to the tool
+> server. Phase 6 places tenant isolation here; that also belongs downstream. And the database
+> figure is stale — it was 58.6 MB before the corpus was re-indexed and is roughly 120 MB after.
+>
+> Treat the phase numbering below as historical. What this repository actually provides is the
+> tool server: read-only mode, tool profiles, the detection corpus, and the query-language field
+> catalog.
+
 **Target stack**
 | Layer | Component |
 |---|---|

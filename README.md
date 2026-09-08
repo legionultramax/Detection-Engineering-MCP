@@ -2,11 +2,11 @@
 
 **Detection Engineering Command Center for Claude Code**
 
-A Model Context Protocol (MCP) server purpose-built for detection engineers. Indexes 12,800+ detection rules from five major detection ecosystems (Sigma, KQL/Sentinel, Splunk ESCU, Elastic, Sublime), enriches them with MITRE ATT&CK v18.1, Atomic Red Team, LOLBAS, LOLFarm (lolol.farm), and 15+ threat intelligence sources — then exposes everything through 122 tools and 8 Claude Code skills that implement the full detection engineering lifecycle.
+A Model Context Protocol (MCP) server purpose-built for detection engineers. Indexes 13,900+ detection rules from four major detection ecosystems (Sigma, KQL/Sentinel, Splunk ESCU, Elastic), enriches them with MITRE ATT&CK v18.1, Atomic Red Team, LOLBAS, LOLFarm (lolol.farm), and 15+ threat intelligence sources — then exposes everything through 129 tools and 15 project-scoped Claude Code skills that implement the full detection engineering lifecycle.
 
 The primary output is **kill-chain correlated queries** (KQL + SPL + Sigma), not isolated atomic rules.
 
-![Tools](https://img.shields.io/badge/Tools-122-blue)
+![Tools](https://img.shields.io/badge/Tools-129-blue)
 ![Skills](https://img.shields.io/badge/Skills-8-green)
 ![Detections](https://img.shields.io/badge/Detections-12%2C810-orange)
 ![MITRE](https://img.shields.io/badge/MITRE_ATT%26CK-v18.1-red)
