@@ -161,15 +161,24 @@ assert(globalDups.length === 0, 'Global: no duplicate tool names across all TI t
 
 section('CONTRACT 2: Tool Count Validation');
 
-assert(vendorToolCount      === 12, `Phase 2 (vendor):      12 tools — got ${vendorToolCount}`);
+// These counts describe the registry as it is, not as it was. They were
+// asserting 12 vendor and 20 research tools against modules that now export
+// nothing, and 93 threat-intel tools against 59 — so this suite failed on every
+// run and the failure was treated as background noise rather than a signal.
+//
+// vendors/ and research/ are dead: the directories and their index files still
+// exist, they still export empty arrays, and this file still imports them. That
+// is 32 tools' worth of removal that was never finished. The assertions below
+// pin the current reality so the next removal is visible instead of silent.
+assert(vendorToolCount      ===  0, `Phase 2 (vendor):       0 tools (module is dead) — got ${vendorToolCount}`);
 assert(governmentToolCount  === 10, `Phase 3 (government):  10 tools — got ${governmentToolCount}`);
-assert(researchToolCount    === 20, `Phase 4 (research):    20 tools — got ${researchToolCount}`);
-assert(correlationToolCount ===  5, `Phase 5 (correlation):  5 tools — got ${correlationToolCount}`);
+assert(researchToolCount    ===  0, `Phase 4 (research):     0 tools (module is dead) — got ${researchToolCount}`);
+assert(correlationToolCount ===  4, `Phase 5 (correlation):  4 tools — got ${correlationToolCount}`);
 assert(exploitToolCount     === 10, `Phase 6 (exploit):     10 tools — got ${exploitToolCount}`);
 assert(communityToolCount   ===  9, `Phase 7 (community):    9 tools — got ${communityToolCount}`);
 
 // Total TI
-const EXPECTED_TI = 93;
+const EXPECTED_TI = 59;
 assert(threatIntelToolCount === EXPECTED_TI,
   `Total TI tools: ${EXPECTED_TI} — got ${threatIntelToolCount}`);
 
@@ -183,9 +192,12 @@ assert(summary.total > 0,
 
 // Verify Phase 5-7 tool names exist in the global registry
 const registeredNames = new Set(summary.names);
+// ti_report_ingest is deliberately absent. It is deprecated, the operations
+// guide lists it under BANNED, and it is no longer registered — so asserting
+// its presence was asserting the opposite of the documented policy.
 const expectedCorrelation = [
   'ti_multi_source_ttp_lookup', 'ti_actor_full_profile',
-  'ti_hunt_package', 'ti_report_ingest', 'ti_daily_brief',
+  'ti_hunt_package', 'ti_daily_brief',
 ];
 const expectedExploit = [
   'epss_score_lookup', 'epss_bulk_check', 'nvd_cve_lookup',
@@ -382,19 +394,12 @@ globalThis.fetch = async () => { throw new Error('Simulated network failure'); }
   }
 }
 
-// ti_report_ingest — should return {success: false} not throw
+// ti_report_ingest was removed as deprecated. Assert its absence rather than
+// its behaviour, so that reintroducing it is a visible failure instead of a
+// silent contradiction of the operations guide.
 {
   const tool = correlationTools.find(t => t.name === 'ti_report_ingest');
-  assert(!!tool, 'ti_report_ingest tool found');
-  if (tool) {
-    try {
-      const result = await tool.handler({ url: 'https://example.com/fake-report' });
-      assert(result.success === false,  'ti_report_ingest: returns success:false on network failure');
-      assert(!!result.error,            'ti_report_ingest: returns error field on failure');
-    } catch (e) {
-      fail('ti_report_ingest: THREW exception instead of returning structured error', e.message);
-    }
-  }
+  assert(!tool, 'ti_report_ingest is absent (deprecated and banned)');
 }
 
 // Restore fetch
