@@ -1,4 +1,4 @@
-{
+﻿{
   "name": "harris-hawkeye-mcp",
   "version": "1.0.0",
   "description": "Harris HawkEye MCP - Security detection engineering, threat intelligence, CVE-to-detection, YARA conversion, and knowledge management for Claude Desktop",
@@ -26,6 +26,7 @@
     "verify:readonly": "npm run build && node tests/verify-readonly-profiles.mjs",
     "verify:queries": "npm run build && node tests/verify-query-validation.mjs",
     "verify:search": "npm run build && node tests/verify-search-ranking.mjs",
+    "verify:coverage": "npm run build && node tests/verify-translation-coverage.mjs",
     "catalog:build": "npm run build && node scripts/build-field-catalog.mjs",
     "catalog:report": "npm run build && node scripts/build-field-catalog.mjs --report",
     "lint": "tsc --noEmit --strict",
@@ -79,3 +80,4 @@
     "README.md"
   ]
 }
+
