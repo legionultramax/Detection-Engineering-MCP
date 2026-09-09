@@ -190,9 +190,23 @@ const uncovered = conn.runQuery(
    GROUP BY cat ORDER BY n DESC`)
   .filter(r => !mappedCategories.includes(r.cat));
 if (uncovered.length > 0) {
-  const missed = uncovered.reduce((a, r) => a + r.n, 0);
-  console.log(`\nUncovered categories — ${missed} rules across ${uncovered.length} categories`);
-  for (const r of uncovered.slice(0, 8)) console.log(`  ${String(r.n).padStart(5)}  ${r.cat}`);
+  const declined = fm.UNMAPPED_CATEGORIES ?? {};
+  const deliberate = uncovered.filter(r => declined[r.cat]);
+  const oversight = uncovered.filter(r => !declined[r.cat]);
+  const sum = (rows) => rows.reduce((a, r) => a + r.n, 0);
+
+  // A decision and an oversight look identical in a coverage number, so they
+  // are separated here. Only the second kind is work.
+  console.log(`\nDeliberately unmapped — ${sum(deliberate)} rules across ${deliberate.length} categories`);
+  for (const r of deliberate.slice(0, 6)) {
+    console.log(`  ${String(r.n).padStart(4)}  ${r.cat.padEnd(26)} ${declined[r.cat].slice(0, 68)}`);
+  }
+  if (oversight.length > 0) {
+    console.log(`\nUnaccounted for — ${sum(oversight)} rules across ${oversight.length} categories`);
+    for (const r of oversight.slice(0, 8)) console.log(`  ${String(r.n).padStart(4)}  ${r.cat}`);
+  } else {
+    console.log('\nUnaccounted for — none. Every corpus category is mapped or explicitly declined.');
+  }
 }
 
 // --- gates ------------------------------------------------------------------

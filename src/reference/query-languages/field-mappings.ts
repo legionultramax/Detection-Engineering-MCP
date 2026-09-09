@@ -307,6 +307,165 @@ FIELD_MAPPINGS.ps_script.Provider_Name = {
     'PowerShell operational logging from other providers on the same event code.',
 };
 
+// ── Remaining corpus categories ────────────────────────────────────────────
+//
+// The 24 categories left uncovered held 381 rules. 292 of them are mapped
+// below; the rest are deliberately left alone and the reasons are recorded at
+// the bottom, because "we chose not to" and "we forgot" look identical in a
+// coverage report otherwise.
+//
+// Field names here were read out of the rules themselves rather than recalled,
+// and every Falcon event was checked against the vendored dictionary — which is
+// how NamedPipeCreated and CreateRemoteThread were caught as non-existent. The
+// real events are NamedPipe and InjectedThread.
+
+/** IIS and web server logs. W3C field names, not the Sigma endpoint taxonomy. */
+CATEGORY_SOURCES.webserver = { kql: 'W3CIISLog', spl: 'Web.Web', cql: null };
+FIELD_MAPPINGS.webserver = {
+  'cs-uri-query': { kql: 'csUriQuery', spl: 'Web.uri_query', cql: null },
+  'cs-uri-stem': { kql: 'csUriStem', spl: 'Web.uri_path', cql: null },
+  'cs-uri': { kql: 'csUriStem', spl: 'Web.url', cql: null },
+  'cs-method': { kql: 'csMethod', spl: 'Web.http_method', cql: null },
+  'sc-status': { kql: 'scStatus', spl: 'Web.status', cql: null },
+  'cs-user-agent': { kql: 'csUserAgent', spl: 'Web.http_user_agent', cql: null },
+  'cs-referer': { kql: 'csReferer', spl: 'Web.http_referrer', cql: null },
+  'cs-username': { kql: 'csUserName', spl: 'Web.user', cql: null },
+  'c-ip': { kql: 'cIP', spl: 'Web.src', cql: null },
+  'cs-host': { kql: 'csHost', spl: 'Web.site', cql: null },
+};
+
+/** Proxy logs. Overlapping but distinct field naming from webserver. */
+CATEGORY_SOURCES.proxy = { kql: 'CommonSecurityLog', spl: 'Web.Web', cql: null };
+FIELD_MAPPINGS.proxy = {
+  'c-uri': { kql: 'RequestURL', spl: 'Web.url', cql: null },
+  'cs-uri': { kql: 'RequestURL', spl: 'Web.url', cql: null },
+  'c-uri-query': { kql: 'RequestURL', spl: 'Web.uri_query', cql: null },
+  'c-useragent': { kql: 'RequestClientApplication', spl: 'Web.http_user_agent', cql: null },
+  'cs-method': { kql: 'RequestMethod', spl: 'Web.http_method', cql: null },
+  'cs-host': { kql: 'DestinationHostName', spl: 'Web.dest', cql: null },
+  'sc-status': { kql: 'EventOutcome', spl: 'Web.status', cql: null },
+  'src_ip': { kql: 'SourceIP', spl: 'Web.src', cql: null },
+  'dst_ip': { kql: 'DestinationIP', spl: 'Web.dest_ip', cql: null },
+  'cs-bytes': { kql: 'SentBytes', spl: 'Web.bytes_out', cql: null },
+};
+
+/** Network-level DNS logs — distinct from dns_query, which is Sysmon 22. */
+CATEGORY_SOURCES.dns = { kql: 'DnsEvents', spl: 'Network_Resolution.DNS', cql: 'DnsRequest' };
+FIELD_MAPPINGS.dns = {
+  query: { kql: 'Name', spl: 'DNS.query', cql: 'DomainName' },
+  record_type: { kql: 'QueryType', spl: 'DNS.record_type', cql: 'RequestType' },
+  answer: { kql: 'IPAddresses', spl: 'DNS.answer', cql: 'IP4Records' },
+  parent_domain: { kql: null, spl: null, cql: null,
+    note: 'Sigma expresses this as a computed parent of the queried name. Derive it in the ' +
+      'target query rather than expecting a column.' },
+};
+
+/** PowerShell module logging, event 4103. */
+CATEGORY_SOURCES.ps_module = { kql: 'DeviceEvents', spl: null, cql: 'ScriptControlScanTelemetry' };
+FIELD_MAPPINGS.ps_module = {
+  Payload: { kql: 'AdditionalFields', spl: 'Payload', cql: null,
+    note: 'Event 4103 payload. Defender carries it inside AdditionalFields; Splunk reads the ' +
+      'field directly off the event.' },
+  ContextInfo: { kql: 'AdditionalFields', spl: 'ContextInfo', cql: null },
+  Image: { kql: 'InitiatingProcessFolderPath', spl: null, cql: 'ContextBaseFileName' },
+  User: { kql: 'InitiatingProcessAccountName', spl: 'user', cql: 'UserName' },
+};
+
+/** Classic PowerShell engine start, event 400. */
+CATEGORY_SOURCES.ps_classic_start = { kql: 'DeviceEvents', spl: null, cql: null };
+FIELD_MAPPINGS.ps_classic_start = {
+  Data: { kql: 'AdditionalFields', spl: 'Data', cql: null,
+    note: 'Event 400 carries HostApplication and engine version inside an unstructured Data ' +
+      'blob. Both targets need a text extraction rather than a field comparison.' },
+};
+
+/** Sysmon 17/18. */
+CATEGORY_SOURCES.pipe_created = { kql: 'DeviceEvents', spl: null, cql: 'NamedPipe' };
+FIELD_MAPPINGS.pipe_created = {
+  PipeName: { kql: 'AdditionalFields', spl: null, cql: 'NamedPipeName',
+    note: 'Defender surfaces named pipes on DeviceEvents where ActionType is NamedPipeEvent, ' +
+      'with the pipe name inside AdditionalFields.' },
+  Image: { kql: 'InitiatingProcessFolderPath', spl: null, cql: 'ContextBaseFileName' },
+};
+
+/** Sysmon 8 — the injection shape. */
+CATEGORY_SOURCES.create_remote_thread = { kql: 'DeviceEvents', spl: null, cql: 'InjectedThread' };
+FIELD_MAPPINGS.create_remote_thread = {
+  SourceImage: { kql: 'InitiatingProcessFolderPath', spl: null, cql: 'ContextBaseFileName' },
+  TargetImage: { kql: 'FolderPath', spl: null, cql: 'TargetFileName' },
+  SourceParentImage: { kql: 'InitiatingProcessParentFileName', spl: null, cql: null },
+  SourceCommandLine: { kql: 'InitiatingProcessCommandLine', spl: null, cql: 'CommandLine' },
+  StartFunction: { kql: 'AdditionalFields', spl: null, cql: null },
+  StartModule: { kql: 'AdditionalFields', spl: null, cql: null },
+  StartAddress: { kql: null, spl: null, cql: null },
+};
+
+/** File-event variants. Same telemetry, different Sysmon event, different Falcon event. */
+CATEGORY_SOURCES.file_delete = { kql: 'DeviceFileEvents', spl: 'Endpoint.Filesystem', cql: 'FileDeleted' };
+CATEGORY_SOURCES.file_access = { kql: 'DeviceFileEvents', spl: 'Endpoint.Filesystem', cql: 'FileOpenInfo' };
+CATEGORY_SOURCES.file_rename = { kql: 'DeviceFileEvents', spl: 'Endpoint.Filesystem', cql: 'FileRenameInfo' };
+CATEGORY_SOURCES.file_change = { kql: 'DeviceFileEvents', spl: 'Endpoint.Filesystem', cql: null };
+CATEGORY_SOURCES.file_executable_detected =
+  { kql: 'DeviceFileEvents', spl: 'Endpoint.Filesystem', cql: 'NewExecutableWritten' };
+CATEGORY_SOURCES.create_stream_hash =
+  { kql: 'DeviceFileEvents', spl: 'Endpoint.Filesystem', cql: 'MotwWritten' };
+
+for (const cat of ['file_delete', 'file_access', 'file_rename', 'file_change',
+                   'file_executable_detected', 'create_stream_hash'] as const) {
+  FIELD_MAPPINGS[cat] = { ...FIELD_MAPPINGS.file_event };
+}
+FIELD_MAPPINGS.file_access.FileName = { kql: 'FileName', spl: 'Filesystem.file_name', cql: 'TargetFileName' };
+FIELD_MAPPINGS.file_rename.SourceFilename = { kql: 'PreviousFileName', spl: null, cql: 'SourceFileName' };
+FIELD_MAPPINGS.file_change.PreviousCreationUtcTime = { kql: null, spl: null, cql: null,
+  note: 'Timestomping evidence. Neither target exposes the prior creation time as a column; ' +
+    'detecting it requires comparing against a baseline.' };
+FIELD_MAPPINGS.create_stream_hash.Contents = { kql: null, spl: null, cql: null,
+  note: 'Alternate data stream contents. Sysmon captures a prefix; neither Defender nor Falcon ' +
+    'exposes stream contents, so match on the stream name and path instead.' };
+FIELD_MAPPINGS.create_stream_hash.Hash = { kql: 'SHA256', spl: 'Filesystem.file_hash', cql: 'SHA256HashData' };
+
+// The last few stragglers the coverage run surfaced. Each appeared three times,
+// which is small but free to close.
+for (const cat of ['file_event', 'file_delete', 'file_access', 'file_rename', 'file_change',
+                   'file_executable_detected', 'create_stream_hash', 'image_load'] as const) {
+  FIELD_MAPPINGS[cat].ParentImage ??= {
+    kql: 'InitiatingProcessParentFileName', spl: null, cql: 'ParentBaseFileName',
+    note: 'The parent of the process touching the file, two hops from the file itself.',
+  };
+}
+FIELD_MAPPINGS.create_remote_thread.TargetParentProcessId = {
+  kql: null, spl: null, cql: 'TargetProcessId',
+  note: 'Sigma means the parent of the injected-into process. Defender does not expose it on ' +
+    'the injection row; pivot via DeviceProcessEvents on the target process.',
+};
+for (const cat of ['ps_module', 'ps_classic_start'] as const) {
+  FIELD_MAPPINGS[cat].Provider_Name ??= FIELD_MAPPINGS.ps_script.Provider_Name;
+}
+
+/**
+ * Categories deliberately left unmapped, and why.
+ *
+ * Recorded so a future coverage report distinguishes a decision from an
+ * oversight. Together these are 89 rules.
+ */
+export const UNMAPPED_CATEGORIES: Record<string, string> = {
+  application: 'Product-specific by definition — the corpus rules target opencanary and ' +
+    'rpc_firewall, whose fields (InterfaceUuid, OpNum) exist only in those products. A generic ' +
+    'mapping would be wrong for every product it did not have in mind.',
+  antivirus: 'Signature names are vendor-specific strings. There is no portable target for ' +
+    '"the AV called it Trojan.GenericKD".',
+  firewall: 'Six rules, and the field names differ per vendor appliance.',
+  wmi_event: 'Three rules. Defender has no WMI-subscription table; the telemetry arrives as ' +
+    'DeviceEvents with a WmiEvent ActionType and needs per-rule handling.',
+  raw_access_thread: 'One rule.',
+  process_tampering: 'One rule.',
+  sysmon_status: 'Sysmon service health, not adversary behaviour.',
+  sysmon_error: 'Sysmon service health, not adversary behaviour.',
+  ps_classic_provider_start: 'One rule, and it overlaps ps_classic_start.',
+  database: 'One rule.',
+  appliance: 'One rule, vendor-specific (Palo Alto).',
+};
+
 /**
  * Sigma value modifiers, and how each is expressed in the target.
  *
