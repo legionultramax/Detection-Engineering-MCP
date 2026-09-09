@@ -123,7 +123,7 @@ function mapToDataSources(detectionMethods: string[] = []): string[] {
 export function initSublimeTables(): void {
   const db = getDb();
 
-  db.run(`
+  db.exec(`
     CREATE TABLE IF NOT EXISTS sublime_sync_meta (
       key   TEXT PRIMARY KEY,
       value TEXT NOT NULL,
@@ -269,7 +269,7 @@ export async function indexSublimeRules(): Promise<{
 
   const files = findYamlFiles(rulesDir);
   const database = getDb();
-  database.run('BEGIN TRANSACTION');
+  database.exec('BEGIN TRANSACTION');
 
   // Clear existing sublime detections for a clean re-index
   runBulkStatement("DELETE FROM detections WHERE source_type = 'sublime'");
@@ -382,7 +382,7 @@ export async function indexSublimeRules(): Promise<{
     [String(rulesIndexed)]
   );
 
-  database.run('COMMIT');
+  database.exec('COMMIT');
   saveDb();
 
   return { rules_indexed: rulesIndexed, errors };

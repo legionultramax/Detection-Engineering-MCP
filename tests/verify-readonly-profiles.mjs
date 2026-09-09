@@ -180,10 +180,21 @@ console.log('\n=== 1. Read-only with no profile withholds only the 8 write tools
       String((instr.match(/^- \w+\(/gm) ?? []).length));
     const stats = await c.call(3, 'get_stats');
     check('get_stats returns data', stats.isError !== true, textOf(stats).slice(0, 120));
-    // The seed path that the earlier runBulkStatement guard broke. This tool
-    // triggers the lazy LOLFarm seed, so it proves seeding works read-only.
+    // This tool triggers the lazy LOLFarm seeder, which is the sharpest test of
+    // read-only behaviour because it wants to write on a read path.
+    //
+    // Under sql.js it wrote 85 constants into the in-memory image and they
+    // vanished on exit, so the tool appeared to work. On better-sqlite3 the file
+    // is genuinely read-only and the write is skipped, so the tool returns empty
+    // instead. That is the honest outcome: reference data belongs baked into the
+    // database by the indexer, not synthesised on every boot.
+    //
+    // What must hold either way is that a read path never fails because a
+    // caching or seeding write could not happen.
     const lf = await c.call(4, 'get_lolfarm_context', { technique_id: 'T1059.001', mode: 'summary' });
-    check('lazy LOLFarm seed works read-only', !textOf(lf).includes('EREADONLY'), textOf(lf).slice(0, 160));
+    check('a read path that wants to write does not fail read-only',
+      !textOf(lf).includes('EREADONLY') && !textOf(lf).includes('SQLITE_READONLY'),
+      textOf(lf).slice(0, 200));
     const payload = JSON.stringify(tools);
     console.log(`        read-only payload: ${payload.length} bytes (~${Math.round(payload.length / 3.5)} tokens)`);
   } catch (e) {
@@ -335,7 +346,14 @@ console.log('\n=== 6. Read-only against an empty database is fatal ===');
     DETECTIONS_DB_PATH: EMPTY, HAWKEYE_READONLY: '1',
   });
   check('exits with code 1', exitCode === 1, `exit ${exitCode}`);
-  check('explains why', stderr.includes('holds no detections'));
+  // Two layers can catch this, and which one fires depends on whether the file
+  // exists at all. On better-sqlite3 a read-only open of a missing file fails
+  // in initDbAsync before the server gets far enough to count detections, which
+  // is the earlier and more precise failure. Either message is acceptable; the
+  // requirement is that it says what is wrong rather than exiting silently.
+  check('explains why',
+    /holds no detections|no database exists/.test(stderr),
+    stderr.split('\n').filter(l => /FATAL|EREADONLY/.test(l))[0] ?? stderr.slice(-200));
   check('empty database not persisted', !existsSync(EMPTY) || statSync(EMPTY).size < 200000);
 }
 

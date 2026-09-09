@@ -260,7 +260,7 @@ export async function indexMitreAttack(stixPath: string): Promise<{
 
   // Use transaction for bulk insert performance (avoids per-row saveDb)
   const database = getDb();
-  database.run('BEGIN TRANSACTION');
+  database.exec('BEGIN TRANSACTION');
 
   try {
     // First pass: index all non-relationship objects
@@ -317,9 +317,9 @@ export async function indexMitreAttack(stixPath: string): Promise<{
       }
     }
 
-    database.run('COMMIT');
+    database.exec('COMMIT');
   } catch (e) {
-    database.run('ROLLBACK');
+    database.exec('ROLLBACK');
     throw e;
   }
 

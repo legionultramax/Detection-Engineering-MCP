@@ -220,7 +220,7 @@ function indexSigmaRules(basePath: string): number {
   let skipped = 0;
 
   const database = getDb();
-  database.run('BEGIN TRANSACTION');
+  database.exec('BEGIN TRANSACTION');
 
   for (const filePath of files) {
     try {
@@ -298,7 +298,7 @@ function indexSigmaRules(basePath: string): number {
     }
   }
 
-  database.run('COMMIT');
+  database.exec('COMMIT');
   saveDb();
   if (skipped > 0) console.error(`[indexer] Sigma: skipped ${skipped} of ${files.length} files (parse errors)`);
   return indexed;
@@ -310,7 +310,7 @@ function indexSplunkRules(basePath: string): number {
   let skipped = 0;
 
   const database = getDb();
-  database.run('BEGIN TRANSACTION');
+  database.exec('BEGIN TRANSACTION');
 
   for (const filePath of files) {
     try {
@@ -381,7 +381,7 @@ function indexSplunkRules(basePath: string): number {
     }
   }
 
-  database.run('COMMIT');
+  database.exec('COMMIT');
   saveDb();
   if (skipped > 0) console.error(`[indexer] Splunk: skipped ${skipped} of ${files.length} files (parse errors)`);
   return indexed;
@@ -395,7 +395,7 @@ function indexElasticRules(basePath: string): number {
   let skipped = 0;
 
   const database = getDb();
-  database.run('BEGIN TRANSACTION');
+  database.exec('BEGIN TRANSACTION');
 
   // Index YAML files
   for (const filePath of yamlFiles) {
@@ -539,7 +539,7 @@ function indexElasticRules(basePath: string): number {
     }
   }
 
-  database.run('COMMIT');
+  database.exec('COMMIT');
   saveDb();
   if (skipped > 0) console.error(`[indexer] Elastic: skipped ${skipped} of ${yamlFiles.length + tomlFiles.length} files (parse errors)`);
   return indexed;
@@ -551,7 +551,7 @@ function indexKqlRules(basePath: string): number {
   let skipped = 0;
 
   const database = getDb();
-  database.run('BEGIN TRANSACTION');
+  database.exec('BEGIN TRANSACTION');
 
   for (const filePath of files) {
     try {
@@ -616,7 +616,7 @@ function indexKqlRules(basePath: string): number {
     }
   }
 
-  database.run('COMMIT');
+  database.exec('COMMIT');
   saveDb();
   if (skipped > 0) console.error(`[indexer] KQL: skipped ${skipped} of ${files.length} files (parse errors)`);
   return indexed;
@@ -627,7 +627,7 @@ function indexStories(basePath: string): number {
   let indexed = 0;
 
   const database = getDb();
-  database.run('BEGIN TRANSACTION');
+  database.exec('BEGIN TRANSACTION');
 
   for (const filePath of files) {
     try {
@@ -662,7 +662,7 @@ function indexStories(basePath: string): number {
     }
   }
 
-  database.run('COMMIT');
+  database.exec('COMMIT');
   saveDb();
   return indexed;
 }

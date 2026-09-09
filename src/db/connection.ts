@@ -1,21 +1,44 @@
-// Database connection and initialization using sql.js (pure JavaScript SQLite)
-import initSqlJs, { Database as SqlJsDatabase } from 'sql.js';
+// Database connection, on better-sqlite3.
+//
+// This replaced sql.js, which was the root cause of three separate problems.
+// sql.js is a WASM build that holds the entire database in memory and has no
+// incremental write path: every write meant db.export() of the whole image
+// followed by a full file rewrite, so a 120MB corpus cost 120MB of I/O per
+// statement — initMitreAttackTables() alone spent roughly 930MB of writes per
+// startup on idempotent DDL. Its WASM build also omits FTS5, which is why the
+// flagship search tool was a substring LIKE scan while its description claimed
+// full-text search. And read-only mode could only be approximated by neutering
+// the save function, because the in-memory image was always writable.
+//
+// All three go away. Writes are incremental, FTS5 is available, and read-only is
+// enforced by SQLite itself: opening with readonly:true makes the engine reject
+// a write with SQLITE_READONLY rather than relying on this module to remember
+// not to persist one.
+//
+// Every exported signature is unchanged, so the 256 call sites going through
+// these wrappers did not move.
+//
+// One behaviour did change, and it is a consequence of the file now being
+// genuinely read-only rather than a copy in memory. Runtime seeding of
+// reference data — the 138 coverage telemetry mappings, the 85 LOLFarm
+// constants — used to succeed against the in-memory image and vanish on exit.
+// It cannot happen at all against a read-only file. That is the right outcome:
+// reference data belongs baked into the database by the indexer, not
+// synthesised on every boot. In read-only mode those writes are now skipped
+// with a notice, and the affected tools report empty rather than throwing.
+import Database from 'better-sqlite3';
 import path from 'path';
 import os from 'os';
 import fs from 'fs';
 
-let db: SqlJsDatabase | null = null;
-let SQL: Awaited<ReturnType<typeof initSqlJs>> | null = null;
+type Db = Database.Database;
+
+let db: Db | null = null;
 let dbPath: string = '';
 
-// Read-only mode. sql.js holds the whole database in memory, so nothing reaches
-// disk except through saveDb() — neutralizing that one function is what makes
-// the mode real, and is why in-memory CREATE TABLE in the init*Schema()
-// functions stays harmless. The write guards below exist for a different
-// reason: without them a knowledge-graph write would appear to succeed and then
-// silently evaporate on exit, which is worse than an error.
 let readOnlyCache: boolean | null = null;
 let readOnlyNoticeShown = false;
+let seedSkipNoticeShown = false;
 
 export function isReadOnly(): boolean {
   if (readOnlyCache === null) {
@@ -44,8 +67,8 @@ function getDbPath(): string {
   return path.join(dbDir, 'detections.db');
 }
 
-// Migrate existing databases by adding any new columns that may be missing
-function migrateDetectionsTable(db: SqlJsDatabase): void {
+/** Columns added after the original schema shipped. Idempotent. */
+function migrateDetectionsTable(database: Db): void {
   const newColumns: Record<string, string> = {
     logsource_category: 'TEXT',
     logsource_product: 'TEXT',
@@ -65,15 +88,10 @@ function migrateDetectionsTable(db: SqlJsDatabase): void {
     kql_keywords: 'TEXT',
   };
 
-  // Get existing columns via PRAGMA
   const existingCols = new Set<string>();
   try {
-    const stmt = db.prepare('PRAGMA table_info(detections)');
-    while (stmt.step()) {
-      const row = stmt.getAsObject() as { name: string };
-      existingCols.add(row.name);
-    }
-    stmt.free();
+    const info = database.pragma('table_info(detections)') as Array<{ name: string }>;
+    for (const row of info) existingCols.add(row.name);
   } catch {
     return;
   }
@@ -81,21 +99,19 @@ function migrateDetectionsTable(db: SqlJsDatabase): void {
   for (const [col, type] of Object.entries(newColumns)) {
     if (!existingCols.has(col)) {
       try {
-        db.run(`ALTER TABLE detections ADD COLUMN ${col} ${type}`);
+        database.exec(`ALTER TABLE detections ADD COLUMN ${col} ${type}`);
       } catch {
-        // Column already exists or other error — safe to ignore
+        // Column already exists or the table is missing — safe to ignore.
       }
     }
   }
 
-  normalizeTacticsInPlace(db);
+  normalizeTacticsInPlace(database);
 }
 
-// One-shot normalization of mitre_tactics rows that were written before the
-// indexer started using serializeTactics(). Idempotent: rows already in
-// canonical JSON-array-of-slugs form are skipped. Runs every startup but only
-// rewrites rows that are demonstrably malformed (scalar JSON string, or any
-// non-canonical tactic name), so it's cheap after the first pass.
+// One-shot normalization of mitre_tactics rows written before the indexer began
+// using serializeTactics(). Idempotent: rows already in canonical
+// JSON-array-of-slugs form are skipped, so after the first pass it only reads.
 const _TACTIC_CANONICAL_DB: ReadonlySet<string> = new Set([
   'reconnaissance', 'resource-development', 'initial-access', 'execution',
   'persistence', 'privilege-escalation', 'defense-evasion', 'credential-access',
@@ -108,14 +124,14 @@ function _canonTactic(raw: string): string | null {
     .replace(/\s+/g, '-').replace(/-+/g, '-').toLowerCase();
   return _TACTIC_CANONICAL_DB.has(slug) ? slug : null;
 }
-function normalizeTacticsInPlace(db: SqlJsDatabase): void {
+function normalizeTacticsInPlace(database: Db): void {
   try {
-    const stmt = db.prepare(
+    const rows = database.prepare(
       'SELECT id, mitre_tactics FROM detections WHERE mitre_tactics IS NOT NULL'
-    );
+    ).all() as Array<{ id: string; mitre_tactics: string }>;
+
     const fixes: Array<{ id: string; value: string }> = [];
-    while (stmt.step()) {
-      const row = stmt.getAsObject() as { id: string; mitre_tactics: string };
+    for (const row of rows) {
       const raw = row.mitre_tactics;
       let isCanonical = false;
       let normalized: string[] = [];
@@ -139,39 +155,23 @@ function normalizeTacticsInPlace(db: SqlJsDatabase): void {
       }
       if (!isCanonical) fixes.push({ id: row.id, value: JSON.stringify(normalized) });
     }
-    stmt.free();
 
     if (fixes.length === 0) return;
     console.error(`[db] Normalizing mitre_tactics for ${fixes.length} legacy rows...`);
-    const upd = db.prepare('UPDATE detections SET mitre_tactics = ? WHERE id = ?');
-    for (const f of fixes) { upd.run([f.value, f.id]); }
-    upd.free();
+    const upd = database.prepare('UPDATE detections SET mitre_tactics = ? WHERE id = ?');
+    const applyAll = database.transaction((batch: typeof fixes) => {
+      for (const f of batch) upd.run(f.value, f.id);
+    });
+    applyAll(fixes);
     console.error(`[db] Tactic normalization complete.`);
   } catch (err) {
     console.error('[db] Tactic normalization failed (non-fatal):', (err as Error).message);
   }
 }
 
-export async function initDbAsync(): Promise<SqlJsDatabase> {
-  if (db) return db;
-  
-  if (!SQL) {
-    SQL = await initSqlJs();
-  }
-  
-  dbPath = getDbPath();
-  console.error(`[db] Initializing database at ${dbPath}`);
-  
-  // Load existing database if it exists
-  if (fs.existsSync(dbPath)) {
-    const buffer = fs.readFileSync(dbPath);
-    db = new SQL.Database(buffer);
-  } else {
-    db = new SQL.Database();
-  }
-  
-  // Create core tables
-  db.run(`
+/** Core schema. Only created when the connection is writable. */
+function createCoreSchema(database: Db): void {
+  database.exec(`
     CREATE TABLE IF NOT EXISTS detections (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
@@ -209,31 +209,20 @@ export async function initDbAsync(): Promise<SqlJsDatabase> {
       kql_category TEXT,
       kql_tags TEXT,
       kql_keywords TEXT
-    )
-  `);
+    );
 
-  // Migrate existing databases: add any new columns that may be missing
-  migrateDetectionsTable(db);
+    CREATE INDEX IF NOT EXISTS idx_detections_source ON detections(source_type);
+    CREATE INDEX IF NOT EXISTS idx_detections_severity ON detections(severity);
+    CREATE INDEX IF NOT EXISTS idx_detections_name ON detections(name);
+    CREATE INDEX IF NOT EXISTS idx_logsource_product ON detections(logsource_product);
+    CREATE INDEX IF NOT EXISTS idx_logsource_category ON detections(logsource_category);
+    CREATE INDEX IF NOT EXISTS idx_detection_type ON detections(detection_type);
+    CREATE INDEX IF NOT EXISTS idx_asset_type ON detections(asset_type);
+    CREATE INDEX IF NOT EXISTS idx_security_domain ON detections(security_domain);
+    CREATE INDEX IF NOT EXISTS idx_kql_category ON detections(kql_category);
+    CREATE INDEX IF NOT EXISTS idx_platforms ON detections(platforms);
+    CREATE INDEX IF NOT EXISTS idx_cves ON detections(cves);
 
-  // Base indexes
-  db.run(`CREATE INDEX IF NOT EXISTS idx_detections_source ON detections(source_type)`);
-  db.run(`CREATE INDEX IF NOT EXISTS idx_detections_severity ON detections(severity)`);
-  db.run(`CREATE INDEX IF NOT EXISTS idx_detections_name ON detections(name)`);
-
-  // Enrichment field indexes
-  db.run(`CREATE INDEX IF NOT EXISTS idx_logsource_product ON detections(logsource_product)`);
-  db.run(`CREATE INDEX IF NOT EXISTS idx_logsource_category ON detections(logsource_category)`);
-  db.run(`CREATE INDEX IF NOT EXISTS idx_detection_type ON detections(detection_type)`);
-  db.run(`CREATE INDEX IF NOT EXISTS idx_asset_type ON detections(asset_type)`);
-  db.run(`CREATE INDEX IF NOT EXISTS idx_security_domain ON detections(security_domain)`);
-  db.run(`CREATE INDEX IF NOT EXISTS idx_kql_category ON detections(kql_category)`);
-  db.run(`CREATE INDEX IF NOT EXISTS idx_platforms ON detections(platforms)`);
-  db.run(`CREATE INDEX IF NOT EXISTS idx_cves ON detections(cves)`);
-
-  // Note: sql.js WASM build does not include FTS5.
-  // Search uses multi-column LIKE across all enriched fields (see search_detections tool).
-  
-  db.run(`
     CREATE TABLE IF NOT EXISTS stories (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
@@ -247,165 +236,117 @@ export async function initDbAsync(): Promise<SqlJsDatabase> {
       refs TEXT,
       file_path TEXT,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP
-    )
-  `);
-  
-  db.run(`
+    );
+
     CREATE TABLE IF NOT EXISTS cache (
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL,
       expires_at TEXT,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP
-    )
-  `);
-  
-  db.run(`
+    );
+
     CREATE TABLE IF NOT EXISTS dynamic_tables (
       name TEXT PRIMARY KEY,
       schema TEXT NOT NULL,
       description TEXT,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP
-    )
+    );
   `);
-  
-  saveDb();
+}
+
+/**
+ * Open the database.
+ *
+ * Async only for compatibility — sql.js needed to await its WASM runtime and
+ * every caller awaits this. better-sqlite3 opens synchronously.
+ */
+export async function initDbAsync(): Promise<Db> {
+  if (db) return db;
+
+  dbPath = getDbPath();
+  const readonly = isReadOnly();
+  console.error(`[db] Initializing database at ${dbPath}${readonly ? ' (read-only)' : ''}`);
+
+  if (readonly && !fs.existsSync(dbPath)) {
+    throw new Error(
+      `EREADONLY: read-only mode requested but no database exists at ${dbPath}. ` +
+      'A read-only server cannot create or index one. Point DETECTIONS_DB_PATH at a ' +
+      'populated database, or start once without HAWKEYE_READONLY to build it.'
+    );
+  }
+
+  db = new Database(dbPath, readonly ? { readonly: true, fileMustExist: true } : {});
+
+  if (!readonly) {
+    // WAL lets readers proceed during a write and removes the rollback-journal
+    // rewrite. NORMAL synchronous is the usual WAL pairing: durable against
+    // process crashes, which is the failure this actually needs to survive.
+    db.pragma('journal_mode = WAL');
+    db.pragma('synchronous = NORMAL');
+    createCoreSchema(db);
+    migrateDetectionsTable(db);
+  }
+
   console.error('[db] Database initialized successfully');
   return db;
 }
 
-// Synchronous init for compatibility (requires async init to be called first)
-export function initDb(): SqlJsDatabase {
+/** Synchronous accessor. Requires initDbAsync() to have run. */
+export function initDb(): Db {
   if (!db) {
     throw new Error('Database not initialized. Call initDbAsync() first.');
   }
   return db;
 }
 
-export function getDb(): SqlJsDatabase {
+export function getDb(): Db {
   if (!db) {
     throw new Error('Database not initialized. Call initDbAsync() first.');
   }
   return db;
 }
 
-// Persist the in-memory image to disk.
-//
-// Written via a temporary file and renamed into place: rename is atomic within a
-// filesystem, so a crash or SIGKILL mid-write leaves either the previous image
-// or the new one, never a truncated 59MB file. The temp name carries the pid so
-// two processes cannot collide on it.
-//
-// Failures propagate. This used to swallow them, which made a full disk or a
-// permissions problem indistinguishable from success to every caller.
+/**
+ * Retained as a no-op for its fourteen callers.
+ *
+ * Under sql.js this exported the whole in-memory image and rewrote the file,
+ * which is why it needed atomic-rename handling and Windows retry logic. Writes
+ * now land when the statement runs, so there is nothing to flush. The function
+ * stays so callers do not all have to change at once, and so that "where does
+ * this persist?" has an answer that is easy to find.
+ */
 export function saveDb(): void {
-  if (!db || !dbPath) return;
-
-  if (isReadOnly()) {
-    if (!readOnlyNoticeShown) {
-      console.error(`[db] read-only mode — ${dbPath} will not be modified`);
-      readOnlyNoticeShown = true;
-    }
-    return;
+  if (isReadOnly() && !readOnlyNoticeShown) {
+    console.error(`[db] read-only mode — ${dbPath} will not be modified`);
+    readOnlyNoticeShown = true;
   }
-
-  const tmpPath = `${dbPath}.tmp-${process.pid}`;
-  let fd: number | undefined;
-  try {
-    const buffer = Buffer.from(db.export());
-    fd = fs.openSync(tmpPath, 'w');
-    fs.writeFileSync(fd, buffer);
-    fs.fsyncSync(fd);
-    fs.closeSync(fd);
-    fd = undefined;
-    renameWithRetry(tmpPath, dbPath, buffer);
-  } catch (error) {
-    if (fd !== undefined) {
-      try { fs.closeSync(fd); } catch { /* already closed or invalid */ }
-    }
-    try {
-      if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath);
-    } catch { /* leaving a stale temp file is preferable to masking the real error */ }
-    const message = error instanceof Error ? error.message : String(error);
-    console.error(`[db] Save failed: ${message}`);
-    throw error instanceof Error ? error : new Error(message);
-  }
-}
-
-/** Synchronous sleep. saveDb() is sync all the way down, so the retry has to be. */
-function sleepSync(ms: number): void {
-  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
-}
-
-// Windows fails rename-over-existing with EPERM/EBUSY whenever another handle is
-// open on the destination, and a freshly written multi-megabyte file attracts
-// exactly that from antivirus and the search indexer. The lock is transient, so
-// back off and retry before giving up.
-//
-// If every retry fails we write in place instead. That sacrifices atomicity —
-// the thing this function exists to provide — so it is a last resort and says so
-// loudly. Losing atomicity beats refusing to persist at all, and POSIX never
-// reaches this path.
-const RENAME_BACKOFF_MS = [100, 250, 500, 1000, 2000];
-let nonAtomicWarningShown = false;
-
-function renameWithRetry(tmpPath: string, target: string, buffer: Buffer): void {
-  let lastError: unknown;
-  for (let attempt = 0; attempt <= RENAME_BACKOFF_MS.length; attempt++) {
-    try {
-      fs.renameSync(tmpPath, target);
-      return;
-    } catch (error) {
-      lastError = error;
-      const code = (error as NodeJS.ErrnoException).code;
-      if (code !== 'EPERM' && code !== 'EBUSY' && code !== 'EACCES') throw error;
-      if (attempt < RENAME_BACKOFF_MS.length) sleepSync(RENAME_BACKOFF_MS[attempt]);
-    }
-  }
-
-  if (!nonAtomicWarningShown) {
-    const code = (lastError as NodeJS.ErrnoException)?.code ?? 'unknown';
-    console.error(
-      `[db] atomic rename kept failing (${code}) after ${RENAME_BACKOFF_MS.length} retries — ` +
-      'falling back to an in-place write. A crash during a write can now truncate the database; ' +
-      'check for another process holding it open.'
-    );
-    nonAtomicWarningShown = true;
-  }
-  fs.writeFileSync(target, buffer);
-  try { fs.unlinkSync(tmpPath); } catch { /* best effort */ }
 }
 
 export function closeDb(): void {
   if (db) {
-    // A failed save during shutdown is worth reporting but not worth crashing
-    // on — there is nothing left to recover to at this point.
-    try {
-      saveDb();
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      console.error(`[db] Save on shutdown failed, changes may be lost: ${message}`);
-    }
     db.close();
     db = null;
   }
 }
 
-// Helper for running queries with error handling
+/** Convert a value to something SQLite can bind. */
+function toSqlValue(val: unknown): string | number | Uint8Array | null {
+  if (val === null || val === undefined) return null;
+  if (typeof val === 'string') return val;
+  if (typeof val === 'number') return val;
+  if (typeof val === 'boolean') return val ? 1 : 0;
+  if (typeof val === 'bigint') return Number(val);
+  if (val instanceof Uint8Array) return val;
+  return JSON.stringify(val);
+}
+
 export function runQuery<T>(query: string, params: unknown[] = []): T[] {
   const database = getDb();
   try {
     const stmt = database.prepare(query);
-    if (params.length > 0) {
-      stmt.bind(params as (string | number | Uint8Array | null)[]);
-    }
-    
-    const results: T[] = [];
-    while (stmt.step()) {
-      const row = stmt.getAsObject();
-      results.push(row as T);
-    }
-    stmt.free();
-    return results;
+    return (params.length > 0
+      ? stmt.all(...params.map(toSqlValue))
+      : stmt.all()) as T[];
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.error(`[db] Query error: ${message}`);
@@ -413,40 +354,33 @@ export function runQuery<T>(query: string, params: unknown[] = []): T[] {
   }
 }
 
-// Convert value to SQLite-compatible primitive
-function toSqlValue(val: unknown): string | number | Uint8Array | null {
-  if (val === null || val === undefined) return null;
-  if (typeof val === 'string') return val;
-  if (typeof val === 'number') return val;
-  if (typeof val === 'boolean') return val ? 1 : 0;
-  if (val instanceof Uint8Array) return val;
-  // Convert objects/arrays to JSON string
-  return JSON.stringify(val);
-}
-
 /**
  * Execute schema DDL — CREATE TABLE / CREATE INDEX / ALTER.
  *
- * Differs from runStatement() in two ways: it does not call saveDb(), and it is
- * permitted in read-only mode. Both follow from what DDL is here. sql.js holds
- * the entire database in memory, so `CREATE TABLE IF NOT EXISTS` against an
- * already-populated file changes nothing that needs flushing, and it is
- * idempotent, so re-running it every boot is free.
+ * Permitted in read-only mode only in the sense that it does not pre-emptively
+ * refuse: SQLite will reject it with SQLITE_READONLY if it actually writes.
+ * `CREATE TABLE IF NOT EXISTS` against an already-populated database is a
+ * no-op, so schema initialisation on a read-only connection succeeds without
+ * touching the file.
  *
- * It was not free before. initMitreAttackTables() issued sixteen of these
- * through runStatement(), each triggering a full export and rewrite of the
- * ~59MB image — roughly 930MB of pointless I/O on every startup.
+ * Kept separate from runStatement() because under sql.js each of these
+ * triggered a full image rewrite — initMitreAttackTables() issued sixteen,
+ * costing roughly 930MB of I/O per startup for statements that changed nothing.
  */
 export function runSchemaStatement(query: string, params: unknown[] = []): void {
   const database = getDb();
   try {
     if (params.length > 0) {
-      database.run(query, params.map(toSqlValue));
+      database.prepare(query).run(...params.map(toSqlValue));
     } else {
-      database.run(query);
+      database.exec(query);
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    // On a read-only connection an IF NOT EXISTS that has nothing to do still
+    // reports SQLITE_READONLY on some builds. That is not a failure worth
+    // propagating, because the schema it wanted already exists.
+    if (isReadOnly() && /READONLY/i.test(message)) return;
     console.error(`[db] Schema statement error: ${message}`);
     throw error;
   }
@@ -459,10 +393,10 @@ export function runSchemaStatement(query: string, params: unknown[] = []): void 
  * caller already holds the value it was trying to cache — failing the write
  * would fail a read that had already succeeded.
  *
- * That is not hypothetical. `lookup_lolbas`, `nvd_cve_lookup` and
- * `check_cisa_kev` all fetch or query, then cache. Routing them through
- * runStatement() made three read-only tools throw EREADONLY on a successful
- * lookup, and all three sit in the phase1-authoring profile.
+ * That is not hypothetical. lookup_lolbas, nvd_cve_lookup and check_cisa_kev
+ * all fetch or query, then cache. Routing them through runStatement() made
+ * three read-only tools throw EREADONLY on a successful lookup, and all three
+ * sit in the phase1-authoring profile.
  *
  * Use this only where losing the write is genuinely harmless. Anything a user
  * or model would consider durable belongs in runStatement(), which refuses
@@ -478,12 +412,10 @@ export function runStatement(query: string, params: unknown[] = []): void {
   const database = getDb();
   try {
     if (params.length > 0) {
-      const safeParams = params.map(toSqlValue);
-      database.run(query, safeParams);
+      database.prepare(query).run(...params.map(toSqlValue));
     } else {
-      database.run(query);
+      database.prepare(query).run();
     }
-    saveDb();
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.error(`[db] Statement error: ${message}`);
@@ -491,28 +423,39 @@ export function runStatement(query: string, params: unknown[] = []): void {
   }
 }
 
-// Bulk insert helper — skips per-row saveDb() for performance during batch operations
-// Deliberately NOT guarded by read-only mode, unlike runStatement().
-//
-// This function never calls saveDb(), so it has no path to disk — it mutates
-// only the in-memory image. Read-only is enforced by neutralizing saveDb(), and
-// blocking this as well was a mistake: it broke every path that populates
-// reference data from in-code constants, including the 138 coverage telemetry
-// mappings seeded at startup and the lazy LOLFarm seed that get_lolfarm_context
-// depends on. A read-only server pointed at a database lacking that seed data
-// would crash on startup — precisely the deployment where a prebuilt database is
-// copied onto the host.
-//
-// Letting it run is the correct behaviour: seeds and caches populate for the
-// session, nothing persists, the file on disk is untouched.
+/**
+ * Bulk write, used by the indexer and by the reference-data seeders.
+ *
+ * Under sql.js this was distinguished by skipping the per-statement image
+ * export, which is why it also had to stay unguarded in read-only mode — the
+ * seed paths depended on writing to the in-memory copy. Neither applies now:
+ * writes are incremental, and a read-only file cannot be written at all.
+ *
+ * So in read-only mode this skips rather than throws. The callers are the
+ * indexer, which is already skipped at startup, and the seeders for the
+ * coverage telemetry mappings and the LOLFarm constants. Those will find their
+ * tables empty, which is honest — reference data belongs baked into the
+ * database by the indexer rather than synthesised on every boot, and a
+ * read-only server has no business inventing it.
+ */
 export function runBulkStatement(query: string, params: unknown[] = []): void {
+  if (isReadOnly()) {
+    if (!seedSkipNoticeShown) {
+      console.error(
+        '[db] read-only mode — skipping bulk writes. Reference data that is normally seeded ' +
+        'at runtime (coverage telemetry mappings, LOLFarm constants) will be absent unless it ' +
+        'was baked into the database.'
+      );
+      seedSkipNoticeShown = true;
+    }
+    return;
+  }
   const database = getDb();
   try {
     if (params.length > 0) {
-      const safeParams = params.map(toSqlValue);
-      database.run(query, safeParams);
+      database.prepare(query).run(...params.map(toSqlValue));
     } else {
-      database.run(query);
+      database.prepare(query).run();
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

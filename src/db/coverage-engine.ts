@@ -104,7 +104,7 @@ export function initCoverageEngineSchema(): void {
 
 function seedTelemetryMappings(): void {
   const db = getDb();
-  db.run('BEGIN TRANSACTION');
+  db.exec('BEGIN TRANSACTION');
 
   try {
     const mappings: Array<{
@@ -1607,11 +1607,11 @@ function seedTelemetryMappings(): void {
       );
     }
 
-    db.run('COMMIT');
+    db.exec('COMMIT');
     saveDb();
     console.error(`[db] Seeded ${mappings.length} telemetry mappings`);
   } catch (e) {
-    db.run('ROLLBACK');
+    db.exec('ROLLBACK');
     throw e;
   }
 }

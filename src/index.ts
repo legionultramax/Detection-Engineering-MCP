@@ -215,7 +215,7 @@ async function autoIndexArt(): Promise<void> {
 async function main() {
   console.error('[harris-hawkeye-mcp] Starting Harris HawkEye MCP...');
 
-  // Initialize database (async for sql.js)
+  // Async only for call-site compatibility — the engine opens synchronously.
   await initDbAsync();
 
   // Checked here, before any schema work, for two reasons.

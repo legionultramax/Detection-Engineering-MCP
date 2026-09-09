@@ -120,7 +120,7 @@ export function assessCoverage(sessionId: string): CoverageResult {
 
   // Begin bulk write
   const database = getDb();
-  database.run('BEGIN TRANSACTION');
+  database.exec('BEGIN TRANSACTION');
 
   try {
     for (const [stixId, tech] of techniqueMap) {
@@ -234,9 +234,9 @@ export function assessCoverage(sessionId: string): CoverageResult {
       );
     }
 
-    database.run('COMMIT');
+    database.exec('COMMIT');
   } catch (e) {
-    database.run('ROLLBACK');
+    database.exec('ROLLBACK');
     throw e;
   }
 

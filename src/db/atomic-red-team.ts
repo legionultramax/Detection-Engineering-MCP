@@ -75,7 +75,7 @@ export interface ARTTestRow {
 export function initArtTables(): void {
   const db = getDb();
 
-  db.run(`
+  db.exec(`
     CREATE TABLE IF NOT EXISTS art_tests (
       guid TEXT PRIMARY KEY,
       technique_id TEXT NOT NULL,
@@ -96,11 +96,11 @@ export function initArtTables(): void {
     )
   `);
 
-  db.run(`CREATE INDEX IF NOT EXISTS idx_art_technique ON art_tests(technique_id)`);
-  db.run(`CREATE INDEX IF NOT EXISTS idx_art_executor ON art_tests(executor_name)`);
-  db.run(`CREATE INDEX IF NOT EXISTS idx_art_name ON art_tests(test_name)`);
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_art_technique ON art_tests(technique_id)`);
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_art_executor ON art_tests(executor_name)`);
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_art_name ON art_tests(test_name)`);
 
-  db.run(`
+  db.exec(`
     CREATE TABLE IF NOT EXISTS art_sync_meta (
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL,
@@ -241,7 +241,7 @@ export async function indexArtTests(): Promise<{
     .filter(d => fs.statSync(d).isDirectory());
 
   const database = getDb();
-  database.run('BEGIN TRANSACTION');
+  database.exec('BEGIN TRANSACTION');
 
   // Clear existing data for clean re-index
   runBulkStatement('DELETE FROM art_tests');
@@ -353,7 +353,7 @@ export async function indexArtTests(): Promise<{
     [String(techniquesParsed)]
   );
 
-  database.run('COMMIT');
+  database.exec('COMMIT');
   saveDb();
 
   return { techniques_parsed: techniquesParsed, tests_indexed: testsIndexed, errors };
