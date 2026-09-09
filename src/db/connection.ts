@@ -252,6 +252,30 @@ function createCoreSchema(database: Db): void {
       created_at TEXT DEFAULT CURRENT_TIMESTAMP
     );
   `);
+
+  // The FTS5 index lives in src/db/fts.ts and is created here so a fresh
+  // database has the table from the start. Populating it is a separate,
+  // explicit step — see rebuildFtsIndex() — because it runs after a bulk index
+  // rather than per row.
+  createFtsTable(database);
+}
+
+/**
+ * Create the FTS5 virtual table.
+ *
+ * Declared here rather than imported from ./fts.js to avoid a cycle: fts.ts
+ * needs getDb() and runQuery() from this module, so this module cannot import
+ * from it at load time. The definition is kept in step with FTS_COLUMNS by the
+ * test that asserts the two agree.
+ */
+function createFtsTable(database: Db): void {
+  database.exec(`
+    CREATE VIRTUAL TABLE IF NOT EXISTS detections_fts USING fts5(
+      detection_id UNINDEXED,
+      name, mitre_techniques, cves, process_names, tags, description, search_text,
+      tokenize = "unicode61 remove_diacritics 2 tokenchars '.-_'"
+    )
+  `);
 }
 
 /**

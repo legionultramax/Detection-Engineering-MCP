@@ -1,6 +1,7 @@
 // Detection Tools - Search, filter, and analyze security detections
 import { defineTool, ToolDefinition } from '../registry.js';
 import { runQuery } from '../../db/connection.js';
+import { ftsStatus, buildMatchExpression, bm25Weights, FTS_TABLE } from '../../db/fts.js';
 import { cveToDetectionTool, handleCVEToDetection } from './cve-detection.js';
 import { handleYARAToSigma } from './yara-to-sigma.js';
 import { handleSigmaToKQL } from './sigma-to-kql.js';
@@ -62,6 +63,72 @@ interface ScoredDetection extends Detection {
   score: number;
 }
 
+interface FtsRow extends Detection {
+  rank: number;
+}
+
+/**
+ * FTS5 path.
+ *
+ * Returns null if the MATCH expression is rejected, so the caller can fall
+ * back rather than surfacing a SQLite syntax error to the model. bm25 returns
+ * negative scores where more negative is a better match, so it sorts ascending;
+ * the sign is flipped on output so that "higher is better" holds for callers
+ * regardless of which path produced the number.
+ */
+function ftsSearch(opts: {
+  raw: string; terms: string[]; source?: string; severity?: string; limit: number;
+}): Record<string, unknown> | null {
+  const { raw, terms, source, severity, limit } = opts;
+  const match = buildMatchExpression(terms);
+
+  let sql =
+    `SELECT d.id, d.name, d.description, d.source_type, d.severity, d.mitre_techniques,
+            bm25(${FTS_TABLE}, ${bm25Weights()}) AS rank
+     FROM ${FTS_TABLE}
+     JOIN detections d ON d.id = ${FTS_TABLE}.detection_id
+     WHERE ${FTS_TABLE} MATCH ?`;
+  const params: unknown[] = [match];
+
+  if (source) { sql += ' AND d.source_type = ?'; params.push(source); }
+  if (severity) { sql += ' AND d.severity = ?'; params.push(severity); }
+
+  sql += `
+     ORDER BY rank,
+              CASE lower(COALESCE(d.severity, ''))
+                WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2
+                WHEN 'low' THEN 3 ELSE 4 END,
+              d.name
+     LIMIT ?`;
+  params.push(limit);
+
+  let rows: FtsRow[];
+  try {
+    rows = runQuery<FtsRow>(sql, params);
+  } catch {
+    return null;
+  }
+
+  return {
+    count: rows.length,
+    query: raw,
+    terms,
+    ranking: 'FTS5 full-text search, bm25-ranked with per-column weights. Name, MITRE technique ' +
+      'and CVE hits outrank description hits. Terms are prefix-matched, so "powershell" matches ' +
+      '"powershell.exe". Higher score is a better match.',
+    engine: 'fts5',
+    detections: rows.map(d => ({
+      id: d.id,
+      name: d.name,
+      description: d.description?.substring(0, 200),
+      source: d.source_type,
+      severity: d.severity,
+      techniques: d.mitre_techniques ? JSON.parse(d.mitre_techniques) : [],
+      score: Math.round(-d.rank * 100) / 100,
+    })),
+  };
+}
+
 // Substring search with relevance ranking.
 //
 // Two things this deliberately is not. It is not FTS5 — the sql.js WASM build
@@ -79,11 +146,14 @@ const searchDetections = defineTool({
   name: 'search_detections',
   description:
     'Search detection rules by keyword across name, description, tags, MITRE techniques, CVEs, ' +
-    'process names, registry paths, data sources and more. Multi-word queries match rules ' +
-    'containing every term. Results are ranked by relevance — matches in the rule name, MITRE ' +
-    'technique or CVE rank above matches in free-text description. Substring matching, so ' +
-    '"powershell" matches "powershell.exe"; it is not stemmed or semantic, so synonyms and word ' +
-    'variants do not match. Covers Sigma, Splunk ESCU, Elastic and KQL rules.',
+    'process names, registry paths and data sources. Multi-word queries match rules containing ' +
+    'every term. Results are relevance-ranked: hits in the rule name, MITRE technique or CVE ' +
+    'outrank hits in free-text description, and higher score is a better match. Terms are ' +
+    'prefix-matched, so "powershell" finds "powershell.exe" and "certut" finds "certutil". ' +
+    'Technique IDs match exactly ("T1003.001" does not match sibling subtechniques) while a ' +
+    'parent ID ("T1003") matches the whole family. Not semantic and not stemmed, so synonyms ' +
+    'and word variants do not match — search for the term the rule would actually use. The ' +
+    'response reports which engine answered. Covers Sigma, Splunk ESCU, Elastic and KQL rules.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -111,6 +181,18 @@ const searchDetections = defineTool({
     const terms = raw.toLowerCase().split(/\s+/).filter(t => t.length > 2);
     const effectiveTerms = terms.length > 0 ? terms : [raw.toLowerCase()];
     const phrase = raw.toLowerCase();
+
+    // Prefer the FTS5 index when the database ships one that matches the
+    // corpus. The substring path below stays as the fallback rather than being
+    // deleted, because every database built before the index existed — and any
+    // that goes stale — still has to be searchable.
+    const fts = ftsStatus();
+    if (fts.available) {
+      const result = ftsSearch({ raw, terms: effectiveTerms, source, severity, limit });
+      if (result) return result;
+      // A malformed MATCH expression is the model's input problem, not a reason
+      // to answer nothing — fall through to substring matching.
+    }
 
     const scoreParts: string[] = [];
     const scoreParams: unknown[] = [];

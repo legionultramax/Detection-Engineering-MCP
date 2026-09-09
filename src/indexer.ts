@@ -4,6 +4,7 @@ import path from 'path';
 import { parse as parseYaml } from 'yaml';
 import * as TOML from '@iarna/toml';
 import { getDb, runQuery, runBulkStatement, saveDb } from './db/connection.js';
+import { rebuildFtsIndex } from './db/fts.js';
 
 export interface IndexResult {
   total: number;
@@ -167,6 +168,25 @@ export function indexDetections(
     } catch (error) {
       result.errors.push(`Story indexing error: ${error}`);
     }
+  }
+
+  // Rebuild the full-text index once, after all sources are in.
+  //
+  // This is the only place it happens. The read-only deployment cannot build
+  // it, so it has to be inside the database file that ships — which means
+  // whoever indexes is responsible for leaving a usable index behind. Doing it
+  // here rather than per-insert also keeps it to one pass instead of 13,942.
+  try {
+    const fts = rebuildFtsIndex();
+    if (fts.rebuilt) {
+      console.error(`[indexer] Full-text index rebuilt: ${fts.rows} rows in ${fts.ms}ms`);
+    } else if (fts.reason) {
+      console.error(`[indexer] Full-text index not rebuilt: ${fts.reason}`);
+    }
+  } catch (error) {
+    // A missing search index degrades search to substring matching, which is
+    // worth reporting but not worth failing an otherwise successful index over.
+    result.errors.push(`Full-text index rebuild failed: ${error}`);
   }
 
   return result;

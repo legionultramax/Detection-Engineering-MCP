@@ -44,18 +44,90 @@ const conn = await import(pathToFileURL(path.join(ROOT, 'dist', 'db', 'connectio
 await conn.initDbAsync();
 const mod = await import(pathToFileURL(dist).href);
 mod.registerAllTools();
+const fts = await import(pathToFileURL(path.join(ROOT, 'dist', 'db', 'fts.js')).href);
 console.error = realErr;
 const search = (args) => mod.toolRegistry.execute('search_detections', args);
 
-console.log('\n=== 1. The description does not overstate the implementation ===');
+console.log('\n=== 1. The description matches the implementation ===');
 {
+  // The original defect was a description claiming FTS5 the engine did not
+  // have. FTS5 is real now, so the requirement inverts: the description must
+  // describe what the tool does and must still disclaim what it does not.
   const def = mod.toolRegistry.get('search_detections');
   const d = def.description;
-  check('does not claim FTS5', !/fts5/i.test(d), d.slice(0, 120));
-  check('does not claim full-text search', !/full-text search/i.test(d.replace(/not full-text search/i, '')));
-  check('states matching is substring-based', /substring/i.test(d));
   check('states results are ranked', /rank/i.test(d));
+  check('states terms are prefix-matched', /prefix/i.test(d));
   check('warns it is not semantic or stemmed', /stem|synonym|semantic/i.test(d));
+  check('explains technique-ID matching', /T1003/.test(d));
+  check('tells the caller the engine is reported', /engine/i.test(d));
+}
+
+console.log('\n=== 1b. FTS5 index is present and answering ===');
+{
+  const st = fts.ftsStatus(true);
+  check('index exists and matches the corpus', st.available === true, st.reason);
+  check('index row count equals detection count', st.rows === st.detections,
+    `${st.rows} vs ${st.detections}`);
+  const r = await search({ query: 'mimikatz', limit: 3 });
+  check('search reports which engine answered', r.engine === 'fts5', String(r.engine));
+  check('scores are positive so higher is better',
+    r.detections.every(d => d.score > 0), r.detections.map(d => d.score).join(','));
+
+  // The declared column order and weights must match the table the schema
+  // actually creates, or bm25 applies weights to the wrong columns silently.
+  const cols = fts.FTS_COLUMNS.map(c => c.column);
+  const declared = conn.runQuery(
+    `SELECT sql FROM sqlite_master WHERE name = ?`, [fts.FTS_TABLE])[0]?.sql ?? '';
+  check('declared columns appear in the created table in order',
+    cols.every(c => declared.includes(c)) &&
+      cols.reduce((ok, c, i) => ok && (i === 0 || declared.indexOf(c) > declared.indexOf(cols[i - 1])), true),
+    declared.replace(/\s+/g, ' ').slice(0, 160));
+}
+
+console.log('\n=== 1c. Technique IDs and prefixes behave precisely ===');
+{
+  // The tokenchars setting exists so a dotted subtechnique ID stays one token.
+  // Without it "T1003.001" splits and matches every subtechnique of T1003.
+  const exact = conn.runQuery(
+    `SELECT COUNT(*) n FROM ${fts.FTS_TABLE} f JOIN detections d ON d.id = f.detection_id
+     WHERE ${fts.FTS_TABLE} MATCH ?`, ['"T1003.001"'])[0].n;
+  const tagged = conn.runQuery(
+    `SELECT COUNT(*) n FROM detections WHERE mitre_techniques LIKE ?`, ['%T1003.001%'])[0].n;
+  check('exact subtechnique match is precise, not split by the dot',
+    exact === tagged && exact > 0, `matched ${exact}, tagged ${tagged}`);
+
+  const fam = await search({ query: 'T1003', limit: 20 });
+  check('a parent technique ID matches the family via prefix', fam.count > 0, `got ${fam.count}`);
+
+  const pre = await search({ query: 'certut', limit: 5 });
+  check('partial word matches by prefix', pre.count > 0, `got ${pre.count}`);
+  check('prefix hit is the expected binary', /certutil/i.test(pre.detections[0]?.name ?? ''),
+    pre.detections[0]?.name);
+}
+
+console.log('\n=== 1d. FTS5 query syntax cannot be injected ===');
+{
+  // Unquoted, several of these are FTS5 operators rather than search terms: a
+  // hyphen reads as NOT, a colon as a column filter, AND/OR/NEAR as operators.
+  // buildMatchExpression quotes every term, so they must arrive as literals
+  // rather than erroring or silently meaning something else.
+  const nasty = [
+    'lsass-dump', 'field:value', 'AND', 'OR', 'NOT', 'NEAR(a b)',
+    '"unbalanced', 'a*b', '(paren', 'back\\slash', "o'brien",
+  ];
+  let errored = null;
+  for (const q of nasty) {
+    const r = await search({ query: q, limit: 2 });
+    if (r.error === true && q.trim()) { errored = `${q} -> ${r.message}`; break; }
+    if (typeof r.count !== 'number') { errored = `${q} -> no count`; break; }
+  }
+  check('FTS5 operator characters are treated as literals', errored === null, errored ?? '');
+  check('match expression quotes every term',
+    fts.buildMatchExpression(['a-b', 'c:d']) === '"a-b"* AND "c:d"*',
+    fts.buildMatchExpression(['a-b', 'c:d']));
+  check('embedded quotes are doubled, not escaped away',
+    fts.buildMatchExpression(['say"hi']) === '"say""hi"*',
+    fts.buildMatchExpression(['say"hi']));
 }
 
 console.log('\n=== 2. Multi-word queries match (the zero-result regression) ===');
