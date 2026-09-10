@@ -13,7 +13,7 @@ The primary output is **kill-chain correlated queries** (KQL + SPL + Sigma), not
 ![Techniques](https://img.shields.io/badge/Technique_Coverage-596%2F835_(71.3%25)-brightgreen)
 ![ART](https://img.shields.io/badge/Atomic_Red_Team-not_indexed-lightgrey)
 ![TI Sources](https://img.shields.io/badge/TI_Sources-15+-purple)
-![LOLFarm](https://img.shields.io/badge/LOLFarm-1%2C924_entries-purple)
+![LOLFarm](https://img.shields.io/badge/LOLFarm-7%2C519_entries-purple)
 
 ---
 
@@ -24,7 +24,7 @@ The primary output is **kill-chain correlated queries** (KQL + SPL + Sigma), not
 | **Multi-source detection search** | Query 15,176 rules (KQL 5,509 · Sigma 4,030 · Elastic 2,218 · Splunk ESCU 2,185 · Sublime 1,234) plus 365 Splunk analytic stories, from one interface |
 | **MITRE ATT&CK enrichment** | 835 techniques, 187 groups, 787 software, 52 campaigns, 20,048 relationships — all local, all queryable |
 | **Atomic Red Team validation** | Indexes and cross-references Atomic Red Team tests against detection rules. **Deliberately not populated** — the sync clones a repository of working attack payloads, which raises EDR alerts. Enable it knowingly |
-| **LOLFarm intelligence** | Aggregates Living-Off-The-Land data from 7 sources: LOLDrivers (697), HijackLibs (609), LOLRMM (319), LOLBAS (244), LoFP, WADComs, LOTS, MalAPI — 1,924 entries. Four upstream URLs currently return 404, so LoFP, WADComs, LOTS and MalAPI hold seed data only |
+| **LOLFarm intelligence** | Aggregates Living-Off-The-Land data from 7 sources: LoFP (5,614), LOLDrivers (697), HijackLibs (609), LOLRMM (319), LOLBAS (244), plus WADComs, LOTS and MalAPI — 7,519 entries. Five sources sync live; WADComs, LOTS and MalAPI publish nothing machine-readable and stay on seed data |
 | **LOLBAS hard gate** | Every binary-scoped rule must enumerate all known abuse patterns before a single condition is written |
 | **Threat intelligence** | 15+ sources: abuse.ch (URLhaus, ThreatFox, MalwareBazaar), AlienVault OTX, CISA/FBI/NSA/NCSC-UK/CERT-EU, Malpedia, NVD/EPSS, ANY.RUN |
 | **CVE-to-detection** | Input a CVE ID → get KQL, SPL, and Sigma rules with EPSS scores and KEV status |
@@ -56,7 +56,7 @@ flowchart TB
     LOCAL --> DB[("<b>SQLite + FTS5</b><br/>163 MB, self-contained")]
     NET -. "outbound HTTPS" .-> EXT["abuse.ch &nbsp;·&nbsp; AlienVault OTX<br/>NVD / EPSS &nbsp;·&nbsp; CISA KEV<br/>Malpedia &nbsp;·&nbsp; government CERTs"]
 
-    DB --- CONTENT["15,176 detection rules &nbsp;·&nbsp; 365 analytic stories<br/>835 techniques &nbsp;·&nbsp; 20,048 ATT&amp;CK relationships<br/>1,924 LOLFarm entries &nbsp;·&nbsp; 138 telemetry mappings"]
+    DB --- CONTENT["15,176 detection rules &nbsp;·&nbsp; 365 analytic stories<br/>835 techniques &nbsp;·&nbsp; 20,048 ATT&amp;CK relationships<br/>7,519 LOLFarm entries &nbsp;·&nbsp; 138 telemetry mappings"]
 
     classDef client fill:#e8f0fe,stroke:#4285f4,stroke-width:2px,color:#111
     classDef core fill:#fff4e5,stroke:#f59e0b,stroke-width:2px,color:#111
@@ -274,28 +274,38 @@ up a lab and authoring custom atomics, and `pr-extension-workflow` for reviewing
 for coverage gaps before merge. `crowdstrike-falcon-events` is a reference skill over the vendored
 Falcon event dictionary.
 
-> **These are not the skills `CLAUDE.md` names.** That operations guide routes to
-> `detect-engineer`, `killchain-synth`, `advisory-ingest`, `detection-validator`,
-> `coverage-reporter` and `navigator-layer-gen` — six skills that are **not in this repository**.
-> They were per-user rather than version-controlled and did not survive a machine migration. The
-> sixteen above were vendored from
-> [MHaggis/Security-Detections-MCP](https://github.com/MHaggis/Security-Detections-MCP) under
-> Apache-2.0; see [.claude/skills/NOTICE.md](.claude/skills/NOTICE.md) for attribution and
-> [.claude/skills/README.md](.claude/skills/README.md) for the tool-name adaptations they need.
->
-> Nothing upstream covers this project's LOLBAS hard gate, LOLFarm enrichment or kill-chain
-> synthesis, so those remain unwritten.
+All sixteen were vendored from
+[MHaggis/Security-Detections-MCP](https://github.com/MHaggis/Security-Detections-MCP) under
+Apache-2.0; see [.claude/skills/NOTICE.md](.claude/skills/NOTICE.md) for attribution and
+[.claude/skills/README.md](.claude/skills/README.md) for the tool-name adaptations they need
+(`search` → `search_detections`, `get_technique` → `lookup_mitre_technique`, and others).
 
-| Skill | What It Does | Trigger |
+| Skill | What it does | Trigger |
 |---|---|---|
-| **detect-engineer** | Writes production-ready Sigma, KQL, SPL, ESCU YAML, or Elastic TOML rules. LOLBAS is a hard gate — every binary-scoped rule must enumerate all known abuse patterns first. LOLFarm enriches with driver, DLL hijack, RMM, and FP intelligence. 6-dimension validation (Evasion, Fields, Paths, FP, Syntax, LOLFarm). | "Write a detection for X", "Sigma for T1003", "my rule FPs too much" |
-| **advisory-ingest** | Parses CISA advisories, vendor reports, DFIR writeups. Extracts T-IDs, CVEs, IOCs, validates against local data, produces prioritized gap table. | "New CISA advisory dropped", "check this report" |
-| **threat-report-parser** | Turns unstructured intel (vendor blogs, Red Team writeups, malware analysis, conference talks) into scored, deployment-ready Sigma/KQL/SPL detection rules. Deeper than advisory-ingest — fully operationalizes a report. | "Parse this Mandiant blog into rules", "operationalize this Red Team writeup" |
-| **killchain-synth** | Stitches atomic rules into correlated multi-phase queries (KQL let-join, SPL phase-scored, Sigma correlation). Only fires when the full attack sequence is observed on the same host/identity within a time window. | "Correlate these techniques into one alert" |
-| **detection-validator** | Maps detection conditions to ART test artifacts, scores field-level coverage, generates executable test runbooks. Issues DEPLOY-READY / DEPLOY-WITH-CAUTION / DO NOT DEPLOY verdict. | "Will this rule actually fire?" |
-| **data-source-mapper** | Maps techniques to required MITRE data sources, identifies collection gaps, outputs exact Sysmon XML / audit policy / GPO configuration. | "Do I have the logs needed for T1003?" |
-| **coverage-reporter** | Produces structured hunt cards with confidence and priority scores, optionally exports as Word document. | "Generate hunt report", "export to Word" |
-| **navigator-layer-gen** | Generates ATT&CK Navigator-compatible JSON layers: coverage heatmaps, actor mapping, gap analysis overlays. | "Generate a navigator layer" |
+| **cti-detection-engineer** | Analyses a threat, maps ATT&CK, designs the analytic. SIEM-agnostic across SPL, KQL, Sigma and Elastic | "Build a detection for this actor", "map this behaviour" |
+| **threat-report-parser** | Extracts TTPs, behaviours and ATT&CK mappings from unstructured intel — CISA alerts, vendor blogs, research papers. Behaviours over IOCs | "Parse this Mandiant blog", "new CISA advisory dropped" |
+| **detection-yaml-engineer** | Authors and validates the rule file itself: Splunk `security_content` YAML, Sigma, Elastic TOML, KQL analytics | "Write the Sigma for T1003", "fix this rule file" |
+| **spl-optimizer** | Optimises queries for the target engine — search pipeline internals and anti-patterns for SPL, KQL and EQL/ES\|QL | "This search is too slow" |
+| **detection-reviewer** | Pre-deployment QA: structure, logic, MITRE mappings, FP risk, test coverage, operational effectiveness | "Will this rule fire?", "review before merge" |
+| **detection-test-engineer** | Designs true-positive test scenarios so a rule is proven to trigger on real activity | "How do I test this detection?" |
+| **atomic-red-team-testing** | Executes and validates adversary emulation tests, standard and custom (T9999.XXX) | "Validate this against ART" |
+| **data-source-mapper** | Maps techniques to required telemetry across Windows, Linux, cloud, network and EDR, with CIM/ECS/Sigma/KQL field comparisons | "Do I have the logs for T1003?" |
+| **coverage-analysis** | Coverage and gap analysis across techniques, tactics or actors | "What's our coverage for T1059?" |
+| **attack-navigator-generator** | ATT&CK Navigator JSON layers: coverage heatmaps, actor mapping, gap overlays | "Generate a navigator layer" |
+| **analytic-story-builder** | Groups related rules into a coherent narrative — Splunk Analytic Stories, Elastic groups, Sentinel grouping | "Tie these rules into a story" |
+| **supply-chain-analyst** | Package registry (npm, PyPI, RubyGems), CI/CD and container supply-chain compromise, with detection patterns | "Detect a malicious npm package" |
+| **crowdstrike-falcon-events** | Reference over a 998-event Falcon data dictionary — what an event means, which exist per platform, FDR and SIEM onboarding | "What does this Falcon event mean?" |
+| **attack-range-builder** | Stands up an emulation lab — Splunk Attack Range, Elastic labs, Sentinel labs, Docker | "Build me a test lab" |
+| **custom-atomics-deployment** | Authors and deploys custom atomics (T9999.XXX) via YAML and Ansible | "Write a custom atomic for this" |
+| **pr-extension-workflow** | Reviews a detection PR for coverage gaps and recommends additions before merge | "Extend this PR" |
+
+> **Three capabilities have no skill**, and `CLAUDE.md` carries them inline against the tool tiers
+> instead: the LOLBAS hard gate (every binary-scoped rule must enumerate all known abuse patterns
+> before a query is written), LOLFarm enrichment, and kill-chain synthesis (WAT-42). Earlier
+> versions of that guide routed to `detect-engineer`, `killchain-synth`, `advisory-ingest`,
+> `detection-validator`, `coverage-reporter` and `navigator-layer-gen`; those six were per-user
+> rather than version-controlled, did not survive a machine migration, and no longer exist. The
+> guide no longer names them.
 
 ---
 
@@ -353,18 +363,32 @@ Aggregated Living-Off-The-Land intelligence from [lolol.farm](https://lolol.farm
 | **HijackLibs** | DLL hijacking opportunities (phantom, sideloading, search order, env variable) | **609** |
 | **LOLRMM** | Legitimate RMM tools abused for C2/persistence (executables, network artifacts, registry) | **319** |
 | **LOLBAS** | Signed Windows binaries with documented abuse patterns | **244** |
-| **LoFP** | Known false positives mapped to ATT&CK techniques with suppression logic | 19 · seed only |
+| **LoFP** | Known false positives mapped to ATT&CK techniques — what legitimately trips a rule | **5,614** |
 | **LOTS** | Legitimate domains/services abused for exfil and C2 (pastebin, Discord, ngrok) | 14 · seed only |
 | **MalAPI** | Windows API calls common in malware (injection, credential access, MBR wipe) | 12 · seed only |
 | **WADComs** | Offensive AD tools and commands (Impacket, BloodHound, Rubeus, CrackMapExec) | 10 · seed only |
 
-**1,924 entries total.** Populate or refresh with `sync_lolfarm`.
+Populate or refresh with `sync_lolfarm`.
 
-> **Four upstream endpoints currently return HTTP 404** — the LoFP, WADComs, LOTS and MalAPI URLs
-> hardcoded in `src/tools/lolfarm/sync.ts`. Those four fall back to in-code seed constants, so the
-> tools answer rather than error, but with tens of entries instead of hundreds. The other four
-> sources sync normally. `sync_lolfarm` reports per-source status, so a failure is visible rather
-> than silent.
+**Five of the eight sources sync live.** LoFP was one of four whose URL 404'd — it pointed at a
+SigmaHQ path that does not exist. The real upstream is a Hugo site that publishes its whole search
+index as JSON in one request, which took LoFP from 19 seed rows to **5,614 across 375 techniques**.
+
+The remaining three publish nothing machine-readable and return `status: "no_upstream"` with a
+reason rather than a retryable failure:
+
+| Source | Why it cannot sync |
+|---|---|
+| **WADComs** | No JSON API — one Markdown file per tool with YAML front matter (144 files, ~145 requests). Carries no ATT&CK IDs, so synced rows would be invisible to `get_lolfarm_context`, which selects on `mitre_techniques` |
+| **LOTS** | No public data repository. `lots-project.com` serves HTML and answers unknown paths with **200**, not 404 |
+| **MalAPI** | No official repository. `malapi.io` also returns 200 for unknown paths; every existing consumer keeps a private scrape of unknown vintage |
+
+Because two of those hosts soft-404, `sync_lolfarm` inspects the response body and reports
+"expected JSON but got markup" rather than failing inside `JSON.parse` on an unexpected `<`.
+
+LoFP rows that upstream never attributed to a technique (1,432 of them) are stored with an empty
+`technique_id`: `lookup_lofp` matches on equality so it never returns them, but `search_lolfarm`
+matches on text and does. Dropping them had cost all three certutil false positives in the corpus.
 
 The LOLBAS count is the one that matters operationally: the LOLBAS hard gate requires enumerating
 every known abuse pattern for a binary before writing a condition, and a gate with one row in it is

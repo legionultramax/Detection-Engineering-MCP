@@ -22,7 +22,7 @@ import {
   SEED_DRIVERS, SEED_HIJACKLIBS, SEED_RMM, SEED_LOFP,
   SEED_WADCOMS, SEED_LOTS, SEED_MALAPI,
 } from './seed.js';
-import { syncLOLFarm, SYNC_SOURCES } from './sync.js';
+import { syncLOLFarm, SYNC_SOURCES, LIVE_SYNC_SOURCES } from './sync.js';
 
 // ---------------------------------------------------------------------------
 // Seed data loading — populates database on first use (lazy)
@@ -618,14 +618,16 @@ const getLolfarmContext = defineTool({
 // 13. sync_lolfarm — pull live data from upstream sources
 const syncLolfarmTool = defineTool({
   name: 'sync_lolfarm',
-  description: 'Pull fresh data from LOLFarm upstream sources (LOLDrivers, HijackLibs, LOLRMM, LoFP, WADComs, LOTS, MalAPI, LOLBAS) into the local cache. Run weekly via scheduled task — most upstream sources update 1-4x per month. Failures in one source never block the others. Returns per-source counts + errors.',
+  description: 'Pull fresh data from LOLFarm upstream sources into the local cache. Five of the eight sources have a live feed (LOLDrivers, HijackLibs, LOLRMM, LoFP, LOLBAS); WADComs, LOTS and MalAPI publish no machine-readable data and stay on seed data — those return status "no_upstream" with the reason, which is permanent and not worth retrying. Run weekly via scheduled task — upstreams update 1-4x per month. Failures in one source never block the others. Returns per-source counts + errors.',
   inputSchema: {
     type: 'object',
     properties: {
       source: {
         type: 'string',
         enum: SYNC_SOURCES,
-        description: 'Optional: sync only one source. Omit to sync all 8 in parallel.',
+        description:
+          `Optional: sync only one source. Omit to sync all in parallel. ` +
+          `Live: ${LIVE_SYNC_SOURCES.join(', ')}. The others return no_upstream.`,
       },
     },
   },
@@ -635,7 +637,10 @@ const syncLolfarmTool = defineTool({
     const result = await syncLOLFarm(source);
     return {
       ...result,
-      note: 'Failures usually mean upstream API moved or is rate-limiting. Seed data remains intact as fallback.',
+      note:
+        'status "failed" usually means an upstream moved or is rate-limiting — retry is reasonable. ' +
+        'status "no_upstream" means no published feed exists; the reason field explains what was ' +
+        'checked, and retrying will not change it. Seed data remains intact either way.',
     };
   },
 });

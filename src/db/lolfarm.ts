@@ -425,9 +425,16 @@ export function cacheLoFP(entry: LoFPEntry): void {
 }
 
 export function getLoFP(techniqueId: string): LoFPEntry[] {
+  // Rows imported from LoFP that upstream never attributed to a technique are
+  // stored with technique_id = '' so text search can still reach them. An empty
+  // argument here would match every one of them — 1,432 rows presented as the
+  // answer to a technique lookup — so it is refused rather than served.
+  const tid = (techniqueId ?? '').trim().toUpperCase();
+  if (!tid) return [];
+
   const results = runQuery<Record<string, unknown>>(
     'SELECT * FROM lolfarm_lofp WHERE technique_id = ? ORDER BY confidence DESC',
-    [techniqueId.toUpperCase()]
+    [tid]
   );
   return results.map(r => ({
     id: r.id as string,

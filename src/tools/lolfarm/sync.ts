@@ -15,18 +15,58 @@ import { saveDb } from '../../db/connection.js';
 // Upstream endpoints
 // ---------------------------------------------------------------------------
 
+// Four of these were wrong when this file was written — all four 404'd, and the
+// repository paths they named do not exist. They were replaced only after the
+// real upstream was located and its response shape inspected, because guessing
+// a plausible-looking raw.githubusercontent path is how they broke in the
+// first place. Verified against live responses on 2026-09-10; the status column
+// records what each one actually returned.
 const SOURCES = {
-  drivers:    'https://www.loldrivers.io/api/drivers.json',
+  drivers:    'https://www.loldrivers.io/api/drivers.json',           // 200, 687 entries
   hijacklibs: 'https://hijacklibs.net/api/hijacklibs.json',
-  rmm:        'https://lolrmm.io/api/rmm_tools.json',
-  lofp:       'https://raw.githubusercontent.com/SigmaHQ/lofp/main/lofp.json',
-  wadcoms:    'https://raw.githubusercontent.com/swisskyrepo/WADComs/master/WADComs/data.json',
-  lots:       'https://raw.githubusercontent.com/eversinc33/Lots-of-Trusted-Sites/main/data.json',
-  malapi:     'https://raw.githubusercontent.com/nicowillis/malapi.io/main/malapi.json',
-  lolbas:     'https://lolbas-project.github.io/api/lolbas.json',
+  rmm:        'https://lolrmm.io/api/rmm_tools.json',                 // 200, 323 entries
+  // LoFP is a Hugo site whose config declares home = ["HTML", "RSS", "JSON"],
+  // so index.json is the whole dataset in one request: 3,360 pages, 1.4 MB.
+  // Not SigmaHQ — the project is Justin Ibarra's, published from brokensound77.
+  // Note the baseURL in docs/hugo.toml claims lofp.github.io, which 404s; the
+  // site is actually served from the owner's user pages.
+  lofp:       'https://brokensound77.github.io/LoFP/index.json',      // 200, 3,360 entries
+  lolbas:     'https://lolbas-project.github.io/api/lolbas.json',     // 200, 244 entries
 } as const;
 
-type SourceName = keyof typeof SOURCES;
+/**
+ * Sources with no machine-readable upstream, and what was actually checked.
+ *
+ * These are not transient failures, and reporting them as failures was
+ * misleading: it invited retries against endpoints that will never exist, and
+ * buried three permanent gaps among ordinary network noise. `syncOne` now
+ * short-circuits them with a `no_upstream` status carrying the reason.
+ *
+ * Two of the three are worse than a plain 404 — lots-project.com and malapi.io
+ * answer an unknown path with **HTTP 200 and an HTML page**. A URL guessed at
+ * either host therefore fails inside `res.json()` with a syntax error about
+ * an unexpected `<`, which reads like a corrupt payload rather than a wrong
+ * path. `fetchJson` now rejects an HTML body explicitly for that reason.
+ */
+const NO_UPSTREAM: Record<string, string> = {
+  wadcoms:
+    'No JSON API. Data is one Markdown file per tool with YAML front matter in ' +
+    'WADComs/WADComs.github.io:_wadcoms/ (144 files, ~145 requests per sync). ' +
+    'Front matter carries description, command, items, services, OS, attack_types, ' +
+    'references — but no ATT&CK technique IDs, so synced rows could not be reached ' +
+    'by get_lolfarm_context, which selects on mitre_techniques. Implementable; ' +
+    'deliberately not implemented.',
+  lots:
+    'No public data repository or API. lots-project.com serves HTML and returns ' +
+    '200 for unknown paths; site URLs are hex-encoded (/site/2a2e6769746875622e696f). ' +
+    'Only third-party re-exports exist, which would make freshness someone else\'s.',
+  malapi:
+    'No official repository or API. malapi.io serves HTML and returns 200 for ' +
+    'unknown paths. Existing consumers (MalAPIReader, MalAPI-Hunter) each keep a ' +
+    'private scrape, so adopting one would vendor a snapshot of unknown vintage.',
+};
+
+type SourceName = keyof typeof SOURCES | keyof typeof NO_UPSTREAM;
 
 const FETCH_TIMEOUT_MS = 30_000;
 const USER_AGENT = 'harris-hawkeye-mcp/1.0 (+lolfarm-sync)';
@@ -44,7 +84,25 @@ async function fetchJson<T = unknown>(url: string): Promise<T> {
       headers: { 'User-Agent': USER_AGENT, 'Accept': 'application/json' },
     });
     if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
-    return await res.json() as T;
+
+    // Guard against a soft 404 — a 200 carrying the site's HTML shell instead of
+    // the requested resource. Several of these hosts do exactly that, and letting
+    // it reach res.json() produces "Unexpected token '<'", which reads like a
+    // corrupt payload rather than a wrong URL. Check the body, not just the
+    // Content-Type: a static host will happily label an HTML 404 page as JSON.
+    const body = await res.text();
+    const head = body.trimStart().slice(0, 200).toLowerCase();
+    if (head.startsWith('<!doctype') || head.startsWith('<html') || head.startsWith('<?xml')) {
+      throw new Error(
+        `expected JSON but got markup (HTTP ${res.status}, ${body.length} bytes) — ` +
+        'the path is probably wrong; this host answers unknown paths with a page'
+      );
+    }
+    try {
+      return JSON.parse(body) as T;
+    } catch (e) {
+      throw new Error(`malformed JSON (${body.length} bytes): ${(e as Error).message}`);
+    }
   } finally {
     clearTimeout(timer);
   }
@@ -131,19 +189,101 @@ function mapRMM(raw: Record<string, unknown>): LOLRMMEntry | null {
   };
 }
 
+// --- LoFP -------------------------------------------------------------------
+//
+// The upstream is a Hugo search index, not a purpose-built API, so the shape is
+// a page listing rather than a false-positive record:
+//
+//   { title: "- legitimate administrator scripts. filter known parent images.",
+//     description: "",                       // always empty
+//     permalink: "/LoFP/legitimate-admin.../",
+//     tags: [ { title: "t1059.001", permalink: … }, { title: "sigma", … } ] }
+//
+// `title` is the false-positive text; `description` is never populated. `tags`
+// mixes three kinds of value that have to be told apart by pattern, because
+// Hugo flattens all taxonomies into one list: ATT&CK ids (t1059.001), rule
+// sources (sigma, splunk, elastic) and platforms (windows, aws, azure, …).
+//
+// Nothing upstream corresponds to process_name, command_pattern,
+// suppression_logic or confidence, so those stay null rather than being
+// invented — a fabricated `confidence: 'possible'` on all 4,589 rows would make
+// getLoFP's `ORDER BY confidence DESC` look meaningful when it ranks nothing.
+
+const TECHNIQUE_TAG = /^t\d{4}(\.\d{3})?$/i;
+
+/**
+ * Placeholder false-positive texts, dropped rather than stored.
+ *
+ * Upstream rule authors write these into the false-positive field when they
+ * have nothing to say, and LoFP collects each one into a single page carrying
+ * every technique that used it — "unknown" alone is tagged with 277 techniques,
+ * "unlikely" with 149. Kept, they would be the largest LoFP result for
+ * hundreds of techniques while telling a tuner nothing at all. Matched exactly,
+ * so genuinely terse entries ("ansible", "analyst testing") are preserved.
+ */
+const LOFP_PLACEHOLDERS = new Set([
+  'unknown', 'unlikely', 'none', 'n/a', 'na', 'no', 'nothing', 'not applicable',
+  'unknown.', 'none.', 'todo', 'tbd',
+]);
+
+/**
+ * Fan one LoFP page out into one record per technique it is tagged with.
+ *
+ * `lolfarm_lofp.technique_id` is a single column and `getLoFP` selects on
+ * equality, so the row shape the schema wants is (technique, fp text) — one
+ * page tagged with six techniques is six rows.
+ *
+ * 1,432 of the 3,360 pages carry no technique tag at all, mostly from Splunk
+ * rules that document a false positive without attributing it. They are stored
+ * with an empty `technique_id` rather than dropped: `getLoFP` matches on
+ * equality so it never returns them, but `searchLoFP` and `search_lolfarm`
+ * match on description text and do. Dropping them cost all three certutil
+ * false positives in the corpus, which is the kind of silence that reads as
+ * "no known false positives" when the truth is "not attributed to a technique".
+ */
+function parseLoFP(data: unknown): Array<Record<string, unknown>> {
+  if (!Array.isArray(data)) return [];
+  const out: Array<Record<string, unknown>> = [];
+
+  for (const page of data as Array<Record<string, unknown>>) {
+    // Titles arrive lowercased and often carry the source rule's list marker.
+    const text = String(page.title ?? '').replace(/^[-*]\s*/, '').trim();
+    if (!text || LOFP_PLACEHOLDERS.has(text.replace(/\.$/, ''))) continue;
+
+    const tags = Array.isArray(page.tags)
+      ? (page.tags as Array<Record<string, unknown>>).map(t => String(t?.title ?? '').trim())
+      : [];
+    const techniques = [...new Set(
+      tags.filter(t => TECHNIQUE_TAG.test(t)).map(t => t.toUpperCase())
+    )];
+
+    // The permalink is unique across all 3,360 pages, which makes it a stable
+    // primary key under INSERT OR REPLACE — a re-sync updates rows rather than
+    // accumulating duplicates. Slug plus technique keeps that per row.
+    const slug = String(page.permalink ?? '').replace(/^\/LoFP\/|\/$/g, '') || text.slice(0, 60);
+
+    // '' rather than null: the column is indexed and getLoFP compares with =,
+    // where NULL would never match anything anyway, but '' keeps the value
+    // sortable and makes "unattributed" visible in a SELECT rather than absent.
+    if (techniques.length === 0) {
+      out.push({ id: `${slug}::-`, technique_id: '', description: text });
+      continue;
+    }
+    for (const tid of techniques) {
+      out.push({ id: `${slug}::${tid}`, technique_id: tid, description: text });
+    }
+  }
+  return out;
+}
+
 function mapLoFP(raw: Record<string, unknown>): LoFPEntry | null {
-  const tid = (raw.technique_id as string) || (raw.technique as string);
-  const desc = (raw.description as string) || (raw.fp_description as string);
-  if (!tid || !desc) return null;
-  return {
-    id: (raw.id as string) || `${tid}-${(raw.process as string) || 'unknown'}`,
-    technique_id: tid,
-    process_name: (raw.process as string) || (raw.process_name as string),
-    command_pattern: raw.command_pattern as string,
-    description: desc,
-    suppression_logic: raw.suppression as string,
-    confidence: (raw.confidence as LoFPEntry['confidence']) || 'possible',
-  };
+  const tid = raw.technique_id as string;
+  const desc = raw.description as string;
+  // Only the description is required. technique_id is legitimately '' for the
+  // unattributed pages, so testing it for truthiness here would silently undo
+  // the decision parseLoFP just made.
+  if (typeof tid !== 'string' || !desc) return null;
+  return { id: raw.id as string, technique_id: tid, description: desc };
 }
 
 function mapWADCom(raw: Record<string, unknown>): WADComEntry | null {
@@ -217,7 +357,16 @@ function mapLOLBAS(raw: Record<string, unknown>): LOLBASEntry | null {
 // ---------------------------------------------------------------------------
 
 interface Fetcher {
-  url: string;
+  /**
+   * Upstream endpoint, or `null` when no machine-readable upstream exists —
+   * in which case NO_UPSTREAM[source] holds the reason.
+   *
+   * The mapper and parser for a `null` source are kept rather than deleted.
+   * They encode how the entry shape maps onto the DB, which stays true whether
+   * or not a feed exists today, and leaving them in place makes adopting an
+   * upstream a one-line change instead of a rediscovery.
+   */
+  url: string | null;
   parse: (data: unknown) => Array<Record<string, unknown>>;
   map: (raw: Record<string, unknown>) => unknown;
   cache: (entry: unknown) => void;
@@ -244,24 +393,24 @@ const FETCHERS: Record<SourceName, Fetcher> = {
   },
   lofp: {
     url: SOURCES.lofp,
-    parse: (data) => Array.isArray(data) ? data as Array<Record<string, unknown>> : [],
+    parse: parseLoFP,
     map: (r) => mapLoFP(r),
     cache: (e) => e && cacheLoFP(e as LoFPEntry),
   },
   wadcoms: {
-    url: SOURCES.wadcoms,
+    url: null,
     parse: (data) => Array.isArray(data) ? data as Array<Record<string, unknown>> : [],
     map: (r) => mapWADCom(r),
     cache: (e) => e && cacheWADCom(e as WADComEntry),
   },
   lots: {
-    url: SOURCES.lots,
+    url: null,
     parse: (data) => Array.isArray(data) ? data as Array<Record<string, unknown>> : [],
     map: (r) => mapLOTS(r),
     cache: (e) => e && cacheLOTS(e as LOTSEntry),
   },
   malapi: {
-    url: SOURCES.malapi,
+    url: null,
     parse: (data) => {
       if (Array.isArray(data)) return data as Array<Record<string, unknown>>;
       if (data && typeof data === 'object') {
@@ -290,17 +439,33 @@ const FETCHERS: Record<SourceName, Fetcher> = {
 
 export interface SyncSourceResult {
   source: SourceName;
-  url: string;
-  status: 'success' | 'failed' | 'empty';
+  url: string | null;
+  /**
+   * `no_upstream` is distinct from `failed` on purpose. A failure is worth
+   * retrying; the absence of any published feed is not, and collapsing the two
+   * meant three permanent gaps were reported every week as though the network
+   * had hiccupped. Callers should surface `reason` and move on.
+   */
+  status: 'success' | 'failed' | 'empty' | 'no_upstream';
   fetched: number;
   cached: number;
   duration_ms: number;
   error?: string;
+  reason?: string;
 }
 
 async function syncOne(source: SourceName): Promise<SyncSourceResult> {
   const fetcher = FETCHERS[source];
   const t0 = Date.now();
+
+  if (fetcher.url === null) {
+    return {
+      source, url: null, status: 'no_upstream', fetched: 0, cached: 0,
+      duration_ms: Date.now() - t0,
+      reason: NO_UPSTREAM[source] ?? 'No upstream endpoint is configured for this source.',
+    };
+  }
+
   try {
     const raw = await fetchJson(fetcher.url);
     const records = fetcher.parse(raw);
@@ -327,7 +492,7 @@ async function syncOne(source: SourceName): Promise<SyncSourceResult> {
 
 export async function syncLOLFarm(only?: SourceName): Promise<{
   results: SyncSourceResult[];
-  totals: { fetched: number; cached: number; failed: number };
+  totals: { fetched: number; cached: number; failed: number; no_upstream: number };
   duration_ms: number;
 }> {
   const t0 = Date.now();
@@ -341,10 +506,15 @@ export async function syncLOLFarm(only?: SourceName): Promise<{
       fetched: acc.fetched + r.fetched,
       cached: acc.cached + r.cached,
       failed: acc.failed + (r.status === 'failed' ? 1 : 0),
+      no_upstream: acc.no_upstream + (r.status === 'no_upstream' ? 1 : 0),
     }),
-    { fetched: 0, cached: 0, failed: 0 },
+    { fetched: 0, cached: 0, failed: 0, no_upstream: 0 },
   );
   return { results, totals, duration_ms: Date.now() - t0 };
 }
 
 export const SYNC_SOURCES = Object.keys(FETCHERS) as SourceName[];
+
+/** Sources that can actually be refreshed. The rest are seed-only — see NO_UPSTREAM. */
+export const LIVE_SYNC_SOURCES = (Object.keys(FETCHERS) as SourceName[])
+  .filter(s => FETCHERS[s].url !== null);

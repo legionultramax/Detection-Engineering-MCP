@@ -127,15 +127,29 @@ nothing.
 
 Three datasets are separate from the rule corpus. Each is a deliberate decision.
 
-**LOLFarm — 1,924 entries, 8 metadata endpoints.** Driver hashes, DLL hijack paths, RMM tool names,
+**LOLFarm — 7,519 entries, 8 metadata endpoints.** Driver hashes, DLL hijack paths, RMM tool names,
 abused domains. Metadata about abusable software, not the software.
 
 ```bash
 # writable, then call sync_lolfarm through any MCP client
 ```
 
-Four of the eight endpoints currently return HTTP 404, so LoFP, WADComs, LOTS and MalAPI hold seed
-data only. `sync_lolfarm` reports per-source status.
+**Five of the eight sources have a live feed** — LOLDrivers, HijackLibs, LOLRMM, LoFP and LOLBAS.
+`sync_lolfarm` reports per-source status.
+
+The other three publish nothing machine-readable and stay on seed data. They return
+`status: "no_upstream"` with a `reason` saying what was checked; that is permanent, so retrying will
+not help:
+
+| Source | Why |
+|---|---|
+| **WADComs** | No JSON API. One Markdown file per tool with YAML front matter (144 files). Carries no ATT&CK technique IDs, so synced rows could not be reached by `get_lolfarm_context`, which selects on `mitre_techniques` |
+| **LOTS** | No public data repository. `lots-project.com` serves HTML and returns **200 for unknown paths** |
+| **MalAPI** | No official repository. `malapi.io` also returns 200 for unknown paths; every existing consumer keeps a private scrape |
+
+Because two of those hosts answer unknown paths with 200-and-HTML rather than 404, `sync_lolfarm`
+checks the response body and reports "expected JSON but got markup" instead of failing inside
+`JSON.parse` with an error about an unexpected `<`.
 
 **Sublime — 1,234 email detection rules.** A `git clone` of `sublime-security/sublime-rules`, then
 indexed. Set `SUBLIME_REPO_PATH` to somewhere outside any synced folder.

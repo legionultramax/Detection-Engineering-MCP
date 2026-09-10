@@ -73,6 +73,14 @@ navigator-layers/
 *.bak-*
 *.db.*
 
+# SQLite journal files. *.db.* above does not match these either — the separator
+# is a hyphen, not a dot. They are per-machine scratch: meaningless without the
+# database they belong to, rewritten on every read under WAL mode, and actively
+# harmful in a clone, where a stale -wal would sit next to no .db at all.
+*.db-wal
+*.db-shm
+*.db-journal
+
 # Internal architecture docs — kept local, never published.
 # The public repo is the tool server; the Phase 1/2/3 pipeline design, the
 # platform runbook and the integration questions describe client-facing hunt
