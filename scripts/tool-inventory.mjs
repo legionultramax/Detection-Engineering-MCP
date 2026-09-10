@@ -94,12 +94,34 @@ function readmeBadgeCount() {
   return m ? Number(m[1]) : null;
 }
 
-/** Any "exposing N tools" / "N tools" prose claim in the README. */
+/**
+ * README prose that claims a count for the *whole* registry.
+ *
+ * Deliberately narrow. The original pattern matched any "N tools" anywhere,
+ * which meant a legitimate sentence about a subset — "phase1-authoring is 25
+ * tools" — was reported as drift against the registry total. A check that
+ * fires on correct documentation trains people to ignore it.
+ *
+ * So only phrasings that assert the total count are considered: "exposes N
+ * tools", "through N tools", "N tools across", "N tools registered". A
+ * sentence about a profile or module says neither, and is left alone.
+ */
 function readmeProseCounts() {
   const p = path.join(ROOT, 'README.md');
   if (!existsSync(p)) return [];
   const text = readFileSync(p, 'utf8');
-  return [...text.matchAll(/\b(\d{2,4})\s+tools\b/g)].map(m => Number(m[1]));
+  const patterns = [
+    /\b(?:expose[sd]?|exposing)\s+(\d{2,4})\s+tools\b/gi,
+    /\bthrough\s+(\d{2,4})\s+tools\b/gi,
+    /\b(\d{2,4})\s+tools\s+across\b/gi,
+    /\b(\d{2,4})\s+tools\s+registered\b/gi,
+    /\bregistry\s+has\s+(\d{2,4})\s+tools\b/gi,
+  ];
+  const out = [];
+  for (const re of patterns) {
+    for (const m of text.matchAll(re)) out.push(Number(m[1]));
+  }
+  return out;
 }
 
 const badge = readmeBadgeCount();
