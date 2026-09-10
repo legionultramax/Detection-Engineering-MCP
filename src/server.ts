@@ -1,6 +1,9 @@
 // MCP Server setup and configuration
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
-import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import {
+  resolveTransport, resolveHttpConfig, startHttpTransport, startStdioTransport,
+  type TransportKind, type StartedHttpServer,
+} from './transport.js';
 import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
@@ -279,17 +282,47 @@ export function clearSubscriptions(): void {
 }
 
 export async function startServer(server: Server): Promise<void> {
-  const transport = new StdioServerTransport();
-  
+  let httpServer: StartedHttpServer | null = null;
+
   const cleanup = () => {
     console.error('[security-detections-mcp] Shutting down...');
     clearSubscriptions();
     serverInstance = null;
+    if (httpServer) void httpServer.close();
   };
-  
+
   process.on('SIGINT', cleanup);
   process.on('SIGTERM', cleanup);
-  
-  await server.connect(transport);
-  console.error(`[security-detections-mcp] Server started (v${SERVER_VERSION} - Enhanced Edition)`);
+
+  // stdio unless asked otherwise, so an existing Claude Desktop configuration
+  // is unaffected by the existence of the HTTP path.
+  let kind: TransportKind;
+  try {
+    kind = resolveTransport();
+  } catch (error) {
+    console.error(`[security-detections-mcp] FATAL: ${error instanceof Error ? error.message : String(error)}`);
+    process.exit(1);
+  }
+
+  if (kind === 'http') {
+    try {
+      // A factory, not the instance: each HTTP session needs its own Server,
+      // because a Server binds to one transport. createServer() is cheap — the
+      // tool registry is a module singleton.
+      httpServer = await startHttpTransport(createServer, resolveHttpConfig());
+    } catch (error) {
+      // A misconfigured listener must not fall back to stdio: the operator
+      // asked for HTTP, and a server that silently speaks the wrong protocol
+      // looks identical to one that is simply broken.
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(`[security-detections-mcp] FATAL: HTTP transport failed to start — ${message}`);
+      process.exit(1);
+    }
+  } else {
+    await startStdioTransport(server);
+  }
+
+  console.error(
+    `[security-detections-mcp] Server started (v${SERVER_VERSION} - Enhanced Edition, ${kind})`
+  );
 }

@@ -26,6 +26,7 @@
     "verify:readonly": "npm run build && node tests/verify-readonly-profiles.mjs",
     "verify:queries": "npm run build && node tests/verify-query-validation.mjs",
     "verify:search": "npm run build && node tests/verify-search-ranking.mjs",
+    "verify:http": "npm run build && node tests/verify-http-transport.mjs",
     "verify:coverage": "npm run build && node tests/verify-translation-coverage.mjs",
     "fts:build": "npm run build && node scripts/build-fts.mjs",
     "fts:status": "npm run build && node scripts/build-fts.mjs --status",
@@ -82,4 +83,5 @@
     "README.md"
   ]
 }
+
 
