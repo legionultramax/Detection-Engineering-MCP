@@ -180,7 +180,7 @@ Restart Claude Desktop after configuration. On first launch the server indexes t
 | Variable | Description |
 |---|---|
 | `HAWKEYE_READONLY=1` | The database file is never modified — enforced by SQLite, not by convention. Startup indexing and upstream sync are skipped, and the 8 write tools are withheld from the tool list. Refuses to start against an empty database. **Use this for any shared or hosted instance.** |
-| `HAWKEYE_TOOL_PROFILE` | `phase1-authoring` (25 tools), `research` (all reads), `full` (default). An unrecognised name is fatal at startup rather than silently exposing everything |
+| `HAWKEYE_TOOL_PROFILE` | `phase1-authoring` (27 tools), `research` (all reads), `full` (default). An unrecognised name is fatal at startup rather than silently exposing everything |
 | `HAWKEYE_SKIP_SYNC=1` | Keeps local indexing but skips the Atomic Red Team and Sublime git pulls. Implied by read-only |
 | `HAWKEYE_TRANSPORT` | `stdio` (default, what Claude Desktop uses) or `http` |
 | `HAWKEYE_HTTP_HOST` | Bind address for HTTP, default `127.0.0.1` |
@@ -197,21 +197,26 @@ Restart Claude Desktop after configuration. On first launch the server indexes t
 
 ### Why `HAWKEYE_TOOL_PROFILE` matters
 
-The full surface is 132 tools, roughly 17,800 tokens of tool definitions. That fits comfortably in
-a large context window, so context is not the constraint — **discrimination is**. Eleven `lookup_*`
-LOLFarm tools, thirteen `otx_*`/`threatfox_*`/`bazaar_*` variants, and four plausible answers to
-"find me rules for credential dumping" degrade tool selection well before the window runs out.
+The full surface is 132 tools — a 66 KB `tools/list` payload, on the order of 19,000 tokens. That
+fits comfortably in a large context window, so context is not the constraint — **discrimination is**.
+Eleven `lookup_*` LOLFarm tools, thirteen `otx_*`/`threatfox_*`/`bazaar_*` variants, and four
+plausible answers to "find me rules for credential dumping" degrade tool selection well before the
+window runs out.
 
-`phase1-authoring` is 25 tools and 2,700 tokens — a 92% reduction — chosen so that every fact a
+`phase1-authoring` is 27 tools and a 14.8 KB payload — a 78% reduction — chosen so that every fact a
 detection hypothesis rests on is retrievable and nothing else is. It deliberately excludes the
-network-bound threat-intel tools, every knowledge-graph write, and the report generators.
+network-bound threat-intel vendors, every knowledge-graph write, and the report generators.
+
+The reduction is in routing pressure, not context. Cutting 105 near-neighbour tool names is the
+point; the ~15,000 tokens saved is a side effect. `npm run verify:readonly` prints the measured
+payload size, so this figure is checkable rather than asserted.
 
 ### Verify before wiring a client to it
 
 ```bash
 npm run lint            # tsc --noEmit --strict
 npm run tools:check     # tool count matches the documentation
-npm run verify:readonly # 52 checks — read-only really is read-only
+npm run verify:readonly # 53 checks — read-only really is read-only
 npm run verify:search   # 36 checks — FTS5, ranking, injection safety
 npm run verify:queries  # 94 checks — language specs and the validation gate
 npm run verify:coverage # 16 checks — translation brief coverage

@@ -203,7 +203,7 @@ caller spend a turn on one that cannot work.
 ## Step 7 — Verify
 
 ```bash
-npm run verify:readonly   # 52  read-only really is read-only
+npm run verify:readonly   # 53  read-only really is read-only
 npm run verify:search     # 36  FTS5, ranking, query-syntax safety
 npm run verify:queries    # 94  language specs and the validation gate
 npm run verify:coverage   # 16  translation brief coverage

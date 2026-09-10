@@ -24,7 +24,7 @@
  */
 import { spawn } from 'node:child_process';
 import { statSync, existsSync, rmSync, readdirSync, mkdtempSync, copyFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -47,6 +47,17 @@ if (!existsSync(SOURCE_DB)) {
   process.exit(2);
 }
 copyFileSync(SOURCE_DB, TEST_DB);
+
+// The expected profile size is read from the profile definition rather than
+// written here as a literal. A hardcoded 25 in this file went stale the moment
+// two tools were added to phase1-authoring, and a test that fails because the
+// test is out of date teaches people to edit the number instead of reading it.
+// What is actually under test is that the server exposes exactly what the
+// profile declares — so assert against the declaration.
+const { PROFILES } = await import(
+  pathToFileURL(path.join(REPO, 'dist', 'tools', 'profiles.js')).href
+);
+const PHASE1_SIZE = PROFILES['phase1-authoring'].include.length;
 
 process.on('exit', () => {
   try { rmSync(SCRATCH, { recursive: true, force: true }); } catch { /* best effort */ }
@@ -282,13 +293,21 @@ console.log('\n=== 3. Stage 2: phase1-authoring profile ===');
     const tools = await c.list();
     const names = tools.map(t => t.name);
 
-    check('tools/list returns exactly 25', names.length === 25, `got ${names.length}`);
+    check(`tools/list returns exactly ${PHASE1_SIZE}`, names.length === PHASE1_SIZE,
+      `got ${names.length}`);
+    // Every declared name resolves. unresolvedNames() covers this too, but only
+    // if it is called; a profile listing a renamed tool would otherwise just
+    // expose fewer tools and still match the length assertion above.
+    const declared = PROFILES['phase1-authoring'].include;
+    const missing = declared.filter(n => !names.includes(n));
+    check('every declared profile tool is exposed', missing.length === 0, missing.join(', '));
     check('in-profile tool present', names.includes('search_detections'));
     check('out-of-profile tool absent', !names.includes('ti_daily_brief'));
     check('report generator excluded', !names.includes('generate_hunt_report'));
     check('knowledge writes excluded', !names.includes('create_entity'));
 
-    check('instructions advertise 25 tools', instr.includes('exposing 25 tools'), instr.slice(0, 110));
+    check(`instructions advertise ${PHASE1_SIZE} tools`,
+      instr.includes(`exposing ${PHASE1_SIZE} tools`), instr.slice(0, 110));
     check('instructions carry scoped notice', instr.includes('scoped tool profile'));
     check('instructions omit excluded names', !instr.includes('ti_daily_brief'));
 
@@ -307,7 +326,9 @@ console.log('\n=== 3. Stage 2: phase1-authoring profile ===');
   c.kill();
   await c.exited;
   check('profile logged at startup', c.err.includes('Tool profile "phase1-authoring" active'));
-  check('profile reports 25 of 132', c.err.includes('25 of 132 tools exposed'));
+  check(`profile reports ${PHASE1_SIZE} of the full surface`,
+    new RegExp(`${PHASE1_SIZE} of \\d+ tools exposed`).test(c.err),
+    c.err.match(/\d+ of \d+ tools exposed/)?.[0] ?? '(no such line)');
 }
 
 console.log('\n=== 4. research profile excludes writes, keeps reads ===');

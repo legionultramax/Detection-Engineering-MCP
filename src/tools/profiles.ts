@@ -1,13 +1,13 @@
 // Tool profiles — scoping the exposed tool surface per deployment.
 //
-// The registry holds 129 tools. That is fine for Claude Desktop, which routes
+// The registry holds 132 tools. That is fine for Claude Desktop, which routes
 // well across a large surface, and it is the wrong shape for a small local
 // model: Gemma 4 26B-A4B is 26B total but only 4B active, and the failure mode
-// is discrimination, not context. The full surface measures ~17,800 tokens,
-// about 14% of a 128K window, so there is room — but eleven `lookup_*` LOLFarm
-// tools, thirteen `otx_*`/`threatfox_*`/`bazaar_*` variants, and four different
-// plausible answers to "find me rules for credential dumping" degrade a
-// 4B-active router long before it runs out of room.
+// is discrimination, not context. The full `tools/list` payload is 66 KB — on
+// the order of 19,000 tokens, about 15% of a 128K window — so there is room. But
+// eleven `lookup_*` LOLFarm tools, thirteen `otx_*`/`threatfox_*`/`bazaar_*`
+// variants, and four different plausible answers to "find me rules for
+// credential dumping" degrade a 4B-active router long before it runs out of room.
 //
 // Profiles are opt-in. With HAWKEYE_TOOL_PROFILE unset the server exposes
 // everything, exactly as it always has.
@@ -50,7 +50,7 @@ export const PROFILES: Record<string, ToolProfile> = {
    * runs on a schedule rather than interactively.
    */
   'phase1-authoring': {
-    description: 'Detection hypothesis authoring — grounding tools only (25 tools)',
+    description: 'Detection hypothesis authoring — grounding tools only (27 tools)',
     include: [
       // Existing rules as grounding
       'search_detections',
@@ -85,9 +85,19 @@ export const PROFILES: Record<string, ToolProfile> = {
       'analyze_coverage',
       'identify_gaps',
       'get_stats',
-      // Vulnerability context
+      // Vulnerability context. epss_score_lookup and misp_warninglist_check are
+      // here because CLAUDE.md's quality gates name them: EPSS + KEV is
+      // blocking for any CVE, and WAT-21 requires the warninglist check before
+      // IOC pivoting. A gate that names a tool the profile withholds is a gate
+      // that cannot be satisfied, which is worse than a larger profile.
+      //
+      // All four reach the network, so on a host without outbound HTTPS they
+      // fail visibly rather than returning nothing. That is the right trade:
+      // an error says "this check did not happen", an absent tool says nothing.
       'nvd_cve_lookup',
+      'epss_score_lookup',
       'check_cisa_kev',
+      'misp_warninglist_check',
       // Translation grounding
       'convert_sigma_to_kql',
       // Query-language authoring. get_query_language_spec supplies the target

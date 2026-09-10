@@ -10,16 +10,50 @@
 ## SKILLS — invoke the matching skill before anything else
 
 ### Security Skills
+
+These are the skills that exist in `.claude/skills/`. Invoking a skill that is not listed here
+fails — check this table rather than assuming a name.
+
 | Trigger | Skill |
 |---|---|
-| Write / fix / tune / convert any detection rule | **detect-engineer** |
-| Parse unstructured threat report, blog, DFIR writeup into rules | **threat-report-parser** |
-| Parse CISA / vendor / DFIR advisory for coverage gaps | **advisory-ingest** |
-| Stitch multiple techniques into one correlated query | **killchain-synth** |
-| Pre-deployment: will this rule actually fire? | **detection-validator** |
+| Analyse a threat, map ATT&CK, design the analytic | **cti-detection-engineer** |
+| Parse unstructured threat report, advisory, blog, DFIR writeup | **threat-report-parser** |
+| Author or fix a detection rule file (Sigma / SPL / KQL / Elastic TOML) | **detection-yaml-engineer** |
+| Tune a query for the target engine's indexes | **spl-optimizer** |
+| Pre-deployment QA: will this rule fire, and what breaks it? | **detection-reviewer** |
+| Build true-positive test scenarios for a rule | **detection-test-engineer** |
+| Validate a rule against Atomic Red Team tests | **atomic-red-team-testing** |
 | Do I have the telemetry / logs needed for this? | **data-source-mapper** |
-| Generate ATT&CK Navigator layer / heatmap / gap JSON | **navigator-layer-gen** |
-| Generate a coverage report across techniques or actors | **coverage-reporter** |
+| Coverage or gap analysis across techniques, tactics or actors | **coverage-analysis** |
+| Generate ATT&CK Navigator layer / heatmap / gap JSON | **attack-navigator-generator** |
+| Group related detections into a narrative or analytic story | **analytic-story-builder** |
+| Package registry, CI/CD or container supply-chain compromise | **supply-chain-analyst** |
+| What does a CrowdStrike Falcon event mean / which exist for a platform | **crowdstrike-falcon-events** |
+| Stand up a lab to test detections | **attack-range-builder** |
+| Author or deploy a custom atomic test | **custom-atomics-deployment** |
+| Review a detection PR for coverage gaps before merge | **pr-extension-workflow** |
+
+**No skill covers these — do them inline against the tool tiers below:**
+
+| Capability | Why there is no skill |
+|---|---|
+| **Kill-chain synthesis** (WAT-42) | Was `killchain-synth`. Not in this repository. Follow WAT-42 directly |
+| **LOLBAS hard gate** | Was part of `detect-engineer`. Enforce it via the quality gate below |
+| **LOLFarm enrichment** | No upstream equivalent. Call the LOLFarm tools directly |
+| **Advisory → gap table** | Was `advisory-ingest`. Use `threat-report-parser`, then WAT-30/31 |
+
+> **Two things to know before invoking any of the sixteen.** They were vendored from
+> [MHaggis/Security-Detections-MCP](https://github.com/MHaggis/Security-Detections-MCP) and reference
+> tool names from that server, several of which differ here: `search` → `search_detections`,
+> `search_groups` → `search_threat_groups`, `get_technique` → `lookup_mitre_technique`,
+> `get_group_techniques` → `get_groups_using_technique`. Others — `find_similar_detections`,
+> `search_stories`, the `generate_*_layer` family — have **no equivalent**; do not fabricate a call,
+> say the capability is absent.
+>
+> And `atomic-red-team-testing`, `attack-range-builder`, `custom-atomics-deployment` and
+> `pr-extension-workflow` assume infrastructure this project does not run. **Atomic Red Team is not
+> indexed**, so the 7 ART tools return empty — treat ART references as unavailable rather than
+> retrying them.
 
 ### Utility Skills
 | Trigger | Skill |
@@ -48,13 +82,18 @@
 
 ## TOOL TIERS
 
+> This table describes the full 132-tool surface. When `HAWKEYE_TOOL_PROFILE` is set — the
+> `phase1-authoring` profile exposes 27 — most of the threat-intel, Abuse.ch, OTX and knowledge-graph
+> rows below are simply absent. **Your own tool list is authoritative.** Work with what is there; do
+> not call a name because it appears here.
+
 ### Tier 1 — RELIABLE (always use first)
 
 | Category | Tools |
 |---|---|
 | **MITRE ATT&CK** | get_threat_group, search_threat_groups, get_software, search_software, lookup_mitre_technique, search_mitre_techniques, get_groups_using_technique, get_software_using_technique, get_mitigations, get_data_sources, list_campaigns, list_data_sources, get_mitre_attack_stats |
 | **Detection Repo** | search_detections, get_detection, list_by_mitre, list_by_severity, analyze_coverage, identify_gaps, get_stats |
-| **Correlation Engine** | ti_multi_source_ttp_lookup, ti_actor_full_profile, ti_hunt_package, ti_daily_brief *(auto-fallbacks to 15 secondary vendors — only trigger Playwright if vendor_reports_found = 0)* |
+| **Correlation Engine** | ti_multi_source_ttp_lookup, ti_actor_full_profile, ti_hunt_package, ti_daily_brief *(auto-fallbacks to 15 secondary vendors — escalate to Tier 2 only if `vendor_reports_found = 0`)* |
 | **Abuse.ch** | urlhaus_lookup_url/host/tag, threatfox_search_ioc/family/tag, threatfox_get_recent_iocs, bazaar_lookup_hash, bazaar_search_family/tag, bazaar_get_recent_samples, bazaar_get_imphash_siblings |
 | **OTX** | otx_pivot_ip/domain/hash/url, otx_search_actor, otx_get_pulse_iocs, otx_subscribed_feed |
 | **Vuln Intel** | nvd_cve_lookup, epss_score_lookup, epss_bulk_check, check_cisa_kev |
@@ -64,7 +103,12 @@
 | **Rule Conversion** *(drafts only — always refine)* | cve_to_detection, convert_yara_to_sigma, convert_sigma_to_kql |
 | **Knowledge Graph** | create_entity, search_entities, create_relation, get_knowledge_summary, log_decision, get_decisions, add_learning, get_learnings |
 
-### Tier 2 — WEB RESEARCH (Playwright + DuckDuckGo)
+### Tier 2 — WEB RESEARCH (Playwright + DuckDuckGo) — *only if a browser server is attached*
+
+**This MCP provides no browser tools.** Playwright comes from a separate MCP server. If
+`browser_navigate` is not in your tool list, Tier 2 is unavailable — say so and proceed on Tier 1
+alone rather than retrying or inventing a call. Do not treat its absence as a failed hunt.
+
 Trigger only when correlation engine returns `vendor_reports_found = 0` after full fallback, or when you need content not available via RSS (PoC code, paywalled reports, campaigns < 4h old).
 
 **Sequence:** `browser_navigate(duckduckgo)` → type query → click search → snapshot → for each result: navigate → wait(3s) → snapshot → extract T-IDs, CVEs, IOCs, CLI patterns, event IDs, inline queries.
@@ -78,24 +122,28 @@ Trigger only when correlation engine returns `vendor_reports_found = 0` after fu
 - Govt advisories: `site:cisa.gov {actor OR CVE}`
 
 ### BANNED — never use
-`*_search_reports`, `*_fetch_report`, `ti_report_ingest` — all deprecated. Use Playwright instead.
+`*_search_reports` and `*_fetch_report` (one pair per vendor, generated at runtime). They are still
+registered and will answer, which is why this is a rule and not a note: each one is a per-vendor RSS
+fetch, so calling them one at a time is what the correlation engine already does across all vendors
+in parallel. Use `ti_multi_source_ttp_lookup` / `ti_actor_full_profile` instead, then Tier 2 if it is
+available. (`ti_report_ingest` appears in older versions of this guide and no longer exists.)
 
 ---
 
 ## WAT PIPELINE
 
-**WAT-00 Classify** — Determine mode. Resolve actor aliases via search_threat_groups(). Check browser state.
+**WAT-00 Classify** — Determine mode. Resolve actor aliases via search_threat_groups(). Check up front whether a browser tool is in your tool list; that decides whether WAT-20 is reachable at all.
 **WAT-01 Recall** — search_entities + get_learnings + get_decisions. Full hit (<72h) = skip WAT-10/11/20/21.
 **WAT-10 Actor Intel** — get_threat_group + malpedia_actor_profile + ti_actor_full_profile → extract ordered_ttp_chain, malware_artifacts, dwell_time. Empty vendor data → WAT-20. Deep: add get_software, list_campaigns, get_mitigations per technique.
 **WAT-11 Technique Intel** — lookup_mitre_technique + get_groups_using_technique + get_software_using_technique + get_data_sources + get_mitigations + ti_multi_source_ttp_lookup. vendor_reports_found=0 → WAT-20.
-**WAT-12 CVE Intel** *(Standard/Deep)* — nvd_cve_lookup + epss_score_lookup + check_cisa_kev in parallel. Playwright mandatory when CVSS ≥ 8.0 or KEV = yes.
-**WAT-20 Web Research** *(Standard/Deep)* — Playwright + DuckDuckGo per Tier 2 sequence. Always run when correlation engine returned empty.
+**WAT-12 CVE Intel** *(Standard/Deep)* — nvd_cve_lookup + epss_score_lookup + check_cisa_kev in parallel. When CVSS ≥ 8.0 or KEV = yes, go to WAT-20; if Tier 2 is unavailable, record that the exploitation detail is unverified rather than treating the NVD summary as sufficient.
+**WAT-20 Web Research** *(Standard/Deep, Tier 2 only)* — Playwright + DuckDuckGo per Tier 2 sequence. Run whenever the correlation engine returned empty. **Skip and say so if no browser tool is in your tool list** — this step has no Tier 1 substitute, so the honest outcome is a hunt grounded on MITRE and the local corpus with the vendor-reporting gap named in the report.
 **WAT-21 IOC Enrichment** — misp_warninglist_check FIRST. Then threatfox + bazaar + otx_pivot + urlhaus in parallel. High-value: bazaar_get_imphash_siblings.
 **WAT-30 Coverage Audit** — list_by_mitre(parent + sub) + search_detections per technique. Classify: COVERED / PARTIAL / GAP.
 **WAT-31 Gap Analysis** — identify_gaps() as baseline only. Manual per-TID check via list_by_mitre. Generic rules = PARTIAL. Priority: CRITICAL > HIGH > MEDIUM > LOW.
 **WAT-40 Query Reference** — Collect best existing rules via search_detections + get_detection + lookup_lolbas. Input for WAT-42, not the deliverable.
 **WAT-41 Validation** — Score every rule: 5 dimensions (Evasion, Fields, Paths, FP, Syntax) + 3 for correlation (Sequence, Entity, Window). Composite < 3.0 = iterate max 2x then flag [HARDENING: PARTIAL].
-**WAT-42 Kill-Chain Synthesis** *(PRIMARY — Standard/Deep)* — invoke **killchain-synth** skill with ordered_ttp_chain + reference rules from WAT-40.
+**WAT-42 Kill-Chain Synthesis** *(PRIMARY — Standard/Deep)* — no skill exists for this; do it inline. Take `ordered_ttp_chain` from WAT-10/11 and the reference rules from WAT-40, then for each phase identify the pivot entity (user, host, process lineage) that links it to the next, and express the sequence in the target language: Sigma `correlation` rules, KQL `let` + `join` on the pivot within a stated window, SPL `stats` grouped by the pivot with per-phase flags. State the correlation window explicitly and say which phases could not be linked. **If the target language has no join — QRadar AQL does not — say so and emit one query per phase plus the correlation logic as a written spec, rather than a single query that cannot express it.**
 **WAT-50 Persist + Report** — create_entity, create_relation, add_learning, log_decision in parallel. Generate report.
 
 ### Shortcuts
@@ -104,8 +152,8 @@ Trigger only when correlation engine returns `vendor_reports_found = 0` after fu
 | **HUNT-ACTOR** | WAT-00→01→10→20→21→30→31→40→41→42→50 |
 | **HUNT-TECHNIQUE** | WAT-00→01→11→20→30→31→40→41→42(if chain)→50 |
 | **ANALYZE-CVE** | WAT-00→01→12→20→30→31→40→41→42→50 |
-| **INGEST-ADVISORY** | → invoke **advisory-ingest** skill directly |
-| **DAILY-BRIEF** | anyrun_trending + threatfox_get_recent_iocs + bazaar_get_recent_samples → Playwright → WAT-50 |
+| **INGEST-ADVISORY** | **threat-report-parser** → WAT-30 → WAT-31 → WAT-40 → WAT-41 → WAT-50 *(no `advisory-ingest` skill; the parser plus the gap steps cover it)* |
+| **DAILY-BRIEF** | anyrun_trending + threatfox_get_recent_iocs + bazaar_get_recent_samples → WAT-20 *(if Tier 2)* → WAT-50 |
 
 ---
 
@@ -117,7 +165,7 @@ Trigger only when correlation engine returns `vendor_reports_found = 0` after fu
 
 ### Executive Summary — 2-3 sentences: what, who, why now.
 ### MITRE Kill-Chain Coverage — Table: Phase | Technique | Groups | Data Source | Coverage
-### Intelligence Sources — Playwright sites, IOCs, campaigns, EPSS/KEV scores
+### Intelligence Sources — vendor reports, IOCs, campaigns, EPSS/KEV scores, and any check that did not run
 ### Detection Gaps — Table: TID | Phase | Priority | Log Required | Why Critical
 ### Abuse Matrix — Pattern | T-ID | CLI | Actors | Coverage (all known patterns)
 ### Atomic Detection Rules — Sigma + KQL + SPL per gap technique, with validation scores
@@ -136,9 +184,15 @@ Trigger only when correlation engine returns `vendor_reports_found = 0` after fu
 - WAT-42 kill-chain synthesis attempted for Standard/Deep
 - Every atomic rule scores ≥ 3/5 on all 5 dimensions
 - Kill-chain query scores ≥ 3/5 on Sequence + Entity + Window
-- Playwright run if any vendor data returned empty
 - EPSS + KEV checked for any CVE
 - Binary-scoped rules: abuse matrix covering ALL known patterns before writing query
+
+**A gate whose tool is unavailable is reported, not skipped silently.** If a tool is absent from the
+tool list, or errors because the host has no outbound HTTPS, state which check did not run and why.
+An unrun check is a caveat on the report; pretending it passed is a false assurance. This applies
+in particular to:
+- **Playwright** — not provided by this server; unavailable unless a browser MCP is attached
+- **EPSS / KEV / MISP warninglist** — reach the network, so they fail on an isolated or proxied host
 
 **Non-blocking — best effort:**
 - MISP warninglist checked for domain/IP IOCs before pivoting
@@ -150,10 +204,12 @@ Trigger only when correlation engine returns `vendor_reports_found = 0` after fu
 
 ## ANTI-PATTERNS — NEVER DO
 
-- Use `*_search_reports`, `*_fetch_report`, or `ti_report_ingest` (deprecated)
+- Use `*_search_reports` or `*_fetch_report` (deprecated — see BANNED above)
 - Present a single atomic rule as final output for Standard/Deep hunts
 - Stop at WAT-40 without WAT-42 synthesis in Standard/Deep mode
-- Accept empty vendor_reports without Playwright supplement
+- Accept empty vendor_reports silently — either supplement via Tier 2 or state the gap
+- Invent a `browser_*` call, or retry one that is not in your tool list
+- Claim a gate passed when the tool backing it was unavailable or errored
 - Skip misp_warninglist_check before IOC pivoting
 - Hardcode IOC values inside detection rule logic
 - Deploy rules with composite score < 3.0

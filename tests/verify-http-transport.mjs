@@ -19,7 +19,7 @@
  */
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import path from 'node:path';
 import net from 'node:net';
 
@@ -31,6 +31,14 @@ if (!existsSync(ENTRY)) {
   console.error('error: dist/index.js not found — run "npm run build" first.');
   process.exit(2);
 }
+
+// Read from the profile definition, not a literal — see the note in
+// verify-readonly-profiles.mjs. The subject here is the transport, so the
+// expected tool count should track whatever the profile currently declares.
+const { PROFILES } = await import(
+  pathToFileURL(path.join(ROOT, 'dist', 'tools', 'profiles.js')).href
+);
+const PHASE1_SIZE = PROFILES['phase1-authoring'].include.length;
 if (!existsSync(DB)) {
   console.error(`error: no database at ${DB}.`);
   process.exit(2);
@@ -158,7 +166,7 @@ console.log('\n=== 2. MCP works end to end over HTTP ===');
 
     const list = await rpc(url, { jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} }, token, sid);
     const tools = list.json?.result?.tools ?? [];
-    check('tools/list returns the scoped profile over HTTP', tools.length === 25,
+    check('tools/list returns the scoped profile over HTTP', tools.length === PHASE1_SIZE,
       `${list.status} got ${tools.length} — ${list.text.slice(0, 140)}`);
 
     const call = await rpc(url, {
@@ -178,7 +186,7 @@ console.log('\n=== 2. MCP works end to end over HTTP ===');
     const stillWorks = await rpc(url,
       { jsonrpc: '2.0', id: 4, method: 'tools/list', params: {} }, token, sid);
     check('the first session still works after a second connects',
-      (stillWorks.json?.result?.tools ?? []).length === 25,
+      (stillWorks.json?.result?.tools ?? []).length === PHASE1_SIZE,
       `got ${(stillWorks.json?.result?.tools ?? []).length}`);
 
     // Without a session, a non-initialize request has to be refused rather
