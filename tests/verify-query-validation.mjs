@@ -72,7 +72,11 @@ console.log('\n=== 3. Alias resolution and bad input ===');
   check('alias sentinel -> kql', a.language === 'kql');
   const b = await call('get_query_language_spec', { language: 'logscale' });
   check('alias logscale -> cql', b.language === 'cql');
-  const c = await call('get_query_language_spec', { language: 'aql' });
+  const aq = await call('get_query_language_spec', { language: 'qradar' });
+  check('alias qradar -> aql', aq.language === 'aql', JSON.stringify(aq).slice(0, 120));
+  // 'aql' used to be the sentinel here, which stopped testing anything the day
+  // AQL was added. Use a language this server genuinely does not support.
+  const c = await call('get_query_language_spec', { language: 'eql' });
   check('unsupported language rejected with the list', c.error === true && Array.isArray(c.supported),
     JSON.stringify(c).slice(0, 140));
   const d = await call('validate_query', { query: '', language: 'kql' });
@@ -282,7 +286,7 @@ console.log('\n=== 9. translate_detection builds a brief, not a query ===');
   const noInput = await call('translate_detection', { target_language: 'kql' });
   check('missing source errors clearly', noInput.error === true);
 
-  const badTarget = await call('translate_detection', { detection_id: 'x', target_language: 'aql' });
+  const badTarget = await call('translate_detection', { detection_id: 'x', target_language: 'eql' });
   check('unsupported target rejected before lookup',
     badTarget.error === true && Array.isArray(badTarget.supported));
 }

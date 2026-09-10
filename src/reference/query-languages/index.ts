@@ -8,16 +8,18 @@ import type { LanguageSpec } from './types.js';
 import { KQL_SPEC } from './kql.js';
 import { SPL_SPEC } from './spl.js';
 import { CQL_SPEC } from './cql.js';
+import { AQL_SPEC, AQL_EVENT_PROPERTIES, AQL_FUNCTIONS } from './aql.js';
 
-export type LanguageId = 'kql' | 'spl' | 'cql';
+export type LanguageId = 'kql' | 'spl' | 'cql' | 'aql';
 
 export const SPECS: Record<LanguageId, LanguageSpec> = {
   kql: KQL_SPEC,
   spl: SPL_SPEC,
   cql: CQL_SPEC,
+  aql: AQL_SPEC,
 };
 
-export const LANGUAGE_IDS: LanguageId[] = ['kql', 'spl', 'cql'];
+export const LANGUAGE_IDS: LanguageId[] = ['kql', 'spl', 'cql', 'aql'];
 
 /** Accepts the aliases people actually type. */
 export function normaliseLanguage(input: string): LanguageId | null {
@@ -26,17 +28,28 @@ export function normaliseLanguage(input: string): LanguageId | null {
     kql: 'kql', kusto: 'kql', sentinel: 'kql', defender: 'kql', 'azure-monitor': 'kql',
     spl: 'spl', splunk: 'spl', escu: 'spl',
     cql: 'cql', crowdstrike: 'cql', logscale: 'cql', humio: 'cql', falcon: 'cql',
+    aql: 'aql', ariel: 'aql', qradar: 'aql', qsip: 'aql',
   };
   return map[s] ?? null;
 }
 
 export interface Extraction {
-  /** Table (KQL), data model (SPL), or event_simpleName (CQL). */
+  /** Table (KQL), data model (SPL), event_simpleName (CQL), or Ariel table (AQL). */
   sources: string[];
   /** Field references, as written. */
   fields: string[];
   /** SPL only: macro names referenced between backticks. */
   macros: string[];
+  /**
+   * AQL only: double-quoted Custom Event Property names.
+   *
+   * Kept apart from `fields` because the two are checkable to completely
+   * different degrees. A normalised Ariel property either exists or does not,
+   * and the validator can say which; a CEP name is a per-deployment
+   * configuration choice that nothing available here can confirm. Merging them
+   * would force one honest answer to be given about both.
+   */
+  customProperties?: string[];
 }
 
 /**
@@ -47,6 +60,9 @@ export interface Extraction {
 function stripComments(query: string, lang: LanguageId): string {
   if (lang === 'kql') return query.replace(/\/\/[^\n]*/g, '');
   if (lang === 'spl') return query.replace(/```[\s\S]*?```/g, ''); // SPL comment macro
+  // Ariel documents no comment syntax, so there is nothing to strip and
+  // stripping // would corrupt a URL or a Windows path inside a string literal.
+  if (lang === 'aql') return query;
   return query.replace(/\/\/[^\n]*/g, '');
 }
 
@@ -97,6 +113,14 @@ export function locallyDefinedNames(query: string, lang: LanguageId): Set<string
     for (const m of text.matchAll(/\bas\s*=?\s*"?([A-Za-z_][A-Za-z0-9_]*)"?/gi)) names.add(m[1]);
   }
 
+  if (lang === 'aql') {
+    // SELECT … AS alias, and the same alias reused in GROUP BY / HAVING /
+    // ORDER BY. Ariel allows an aggregate alias to be referenced downstream —
+    // `HAVING accounts_tried > 10` — so without this the alias is reported as
+    // an unknown property on a query that is entirely correct.
+    for (const m of text.matchAll(/\bAS\s+"?([A-Za-z_][A-Za-z0-9_]*)"?/gi)) names.add(m[1]);
+  }
+
   return names;
 }
 
@@ -105,6 +129,7 @@ export function extract(query: string, lang: LanguageId): Extraction {
   const sources = new Set<string>();
   const fields = new Set<string>();
   const macros = new Set<string>();
+  const customProperties = new Set<string>();
 
   if (lang === 'kql') {
     // Leading token before the first pipe is the table.
@@ -176,7 +201,88 @@ export function extract(query: string, lang: LanguageId): Extraction {
     }
   }
 
-  return { sources: [...sources], fields: [...fields], macros: [...macros] };
+  if (lang === 'aql') {
+    // Ariel table. Only events and flows exist, so an unexpected name here is
+    // reported rather than treated as an unknown-table lookup.
+    for (const mm of text.matchAll(/\bFROM\s+([A-Za-z_][A-Za-z0-9_]*)/gi)) {
+      sources.add(mm[1].toLowerCase());
+    }
+
+    // Custom Event Properties: double-quoted, case-sensitive, per-deployment.
+    // Matched before bare identifiers so a CEP is never also counted as a
+    // normalised property.
+    for (const mm of text.matchAll(/"([^"\n]{1,120})"/g)) {
+      const name = mm[1].trim();
+      if (name) customProperties.add(name);
+    }
+
+    // Bare identifiers, which should all be normalised Ariel properties. The
+    // exclusions matter more than the match: without them every SQL keyword,
+    // function name and string literal becomes a phantom field, and a
+    // validator that reports phantom errors on a correct query is one nobody
+    // reads twice.
+    //
+    // Both quoting styles are blanked before this runs, and both for the same
+    // reason. 'powershell.exe' must not contribute `powershell`, and
+    // "Process Name" must not contribute `process` and `name` — the latter
+    // produced four blocking errors on this spec's own worked example, which
+    // would have made the gate actively harmful.
+    const KEYWORDS = new Set([
+      'select', 'from', 'where', 'group', 'by', 'order', 'having', 'limit',
+      'and', 'or', 'not', 'in', 'is', 'null', 'like', 'ilike', 'matches',
+      'imatches', 'between', 'as', 'asc', 'desc', 'text', 'search', 'case',
+      'when', 'then', 'else', 'end', 'distinct', 'events', 'flows',
+      'parameters', 'into', 'true', 'false',
+      // Time-bound clause, including the unit words, which are otherwise read
+      // as properties: LAST 24 HOURS contributed a field called `hours`.
+      'last', 'start', 'stop', 'minute', 'minutes', 'hour', 'hours',
+      'day', 'days', 'week', 'weeks', 'month', 'months',
+      // Join vocabulary. Ariel supports none of it, and aql.no-join already
+      // reports that — repeating it as four unknown-property errors buries the
+      // one finding that explains what is wrong.
+      'join', 'inner', 'outer', 'left', 'right', 'full', 'on', 'union', 'all',
+    ]);
+    const blanked = text
+      .replace(/'[^']*'/g, "''")
+      .replace(/"[^"\n]*"/g, '""');
+    for (const mm of blanked.matchAll(/\b([A-Za-z_][A-Za-z0-9_]{1,63})\b(?!\s*\()/g)) {
+      const low = mm[1].toLowerCase();
+      if (KEYWORDS.has(low)) continue;
+      if (AQL_FUNCTIONS.has(low)) continue;
+      fields.add(low);
+    }
+  }
+
+  return {
+    sources: [...sources],
+    fields: [...fields],
+    macros: [...macros],
+    ...(lang === 'aql' ? { customProperties: [...customProperties] } : {}),
+  };
+}
+
+/**
+ * Split extracted AQL identifiers into the ones QRadar normalises and the ones
+ * it does not.
+ *
+ * Exported so both the validator and the translation brief classify the same
+ * way — two implementations of "is this a real property" would eventually
+ * disagree, and the disagreement would show up as a validator that rejects a
+ * query the brief told the model to write.
+ */
+export function classifyAqlProperties(
+  fields: readonly string[],
+  locallyDefined: ReadonlySet<string>
+): { normalised: string[]; unknown: string[] } {
+  const normalised: string[] = [];
+  const unknown: string[] = [];
+  const localLower = new Set([...locallyDefined].map(n => n.toLowerCase()));
+  for (const f of fields) {
+    if (localLower.has(f)) continue;
+    if (AQL_EVENT_PROPERTIES.has(f)) normalised.push(f);
+    else unknown.push(f);
+  }
+  return { normalised, unknown };
 }
 
 export type { LanguageSpec } from './types.js';

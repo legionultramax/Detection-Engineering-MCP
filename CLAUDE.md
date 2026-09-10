@@ -4,6 +4,8 @@
 > **596 techniques covered** · **365 analytic stories**
 > **835 techniques** | **187 groups** | **696 malware** | **52 campaigns** | **268 mitigations**
 > **Primary output = kill-chain correlated queries (KQL + SPL + Sigma), not atomic rules.**
+> **Target languages: KQL · SPL · CQL · AQL (QRadar).** Every query goes through `validate_query`
+> before it is presented — a wrong field name returns zero rows, which reads as "nothing found".
 
 ---
 
@@ -143,7 +145,7 @@ available. (`ti_report_ingest` appears in older versions of this guide and no lo
 **WAT-31 Gap Analysis** — identify_gaps() as baseline only. Manual per-TID check via list_by_mitre. Generic rules = PARTIAL. Priority: CRITICAL > HIGH > MEDIUM > LOW.
 **WAT-40 Query Reference** — Collect best existing rules via search_detections + get_detection + lookup_lolbas. Input for WAT-42, not the deliverable.
 **WAT-41 Validation** — Score every rule: 5 dimensions (Evasion, Fields, Paths, FP, Syntax) + 3 for correlation (Sequence, Entity, Window). Composite < 3.0 = iterate max 2x then flag [HARDENING: PARTIAL].
-**WAT-42 Kill-Chain Synthesis** *(PRIMARY — Standard/Deep)* — no skill exists for this; do it inline. Take `ordered_ttp_chain` from WAT-10/11 and the reference rules from WAT-40, then for each phase identify the pivot entity (user, host, process lineage) that links it to the next, and express the sequence in the target language: Sigma `correlation` rules, KQL `let` + `join` on the pivot within a stated window, SPL `stats` grouped by the pivot with per-phase flags. State the correlation window explicitly and say which phases could not be linked. **If the target language has no join — QRadar AQL does not — say so and emit one query per phase plus the correlation logic as a written spec, rather than a single query that cannot express it.**
+**WAT-42 Kill-Chain Synthesis** *(PRIMARY — Standard/Deep)* — no skill exists for this; do it inline. Take `ordered_ttp_chain` from WAT-10/11 and the reference rules from WAT-40, then for each phase identify the pivot entity (user, host, process lineage) that links it to the next, and express the sequence in the target language: Sigma `correlation` rules, KQL `let` + `join` on the pivot within a stated window, SPL `stats` grouped by the pivot with per-phase flags, CQL `groupBy` over the pivot. State the correlation window explicitly and say which phases could not be linked. **QRadar AQL has no join, no union and no subquery** — `validate_query` blocks all three. For AQL, emit one query per phase plus the correlation logic as a written spec, or collapse the phases into a single pass with conditional aggregation over a shared key; never a single query that cannot express the sequence.
 **WAT-50 Persist + Report** — create_entity, create_relation, add_learning, log_decision in parallel. Generate report.
 
 ### Shortcuts

@@ -12,13 +12,38 @@
 // system, which is why nothing here is presented as fact without the catalog
 // agreeing.
 
-/** Target field for one Sigma field, per language. null = no equivalent. */
+/**
+ * Target field for one Sigma field, per language. null = no equivalent.
+ *
+ * `aql` is optional rather than required, and the difference is deliberate.
+ * QRadar normalises only the network and identity envelope; every process,
+ * file, registry and command-line field is a Custom Event Property whose name
+ * is chosen per deployment. Where a normalised property exists the target is
+ * given bare and lower-case (`destinationport`). Where it does not, the target
+ * is given **with its double quotes** (`'"Process CommandLine"'`) — which is
+ * both the syntax Ariel requires and the signal that this is a per-deployment
+ * guess rather than a fact. An absent `aql` key means no mapping was authored
+ * for that field at all, which the brief reports as unmapped.
+ */
 export interface FieldTargets {
   kql: string | null;
   spl: string | null;
   cql: string | null;
+  aql?: string | null;
   /** Why a mapping is awkward, where it is. */
   note?: string;
+}
+
+/**
+ * True when an AQL target names a Custom Event Property rather than a
+ * normalised Ariel property.
+ *
+ * The test is the quoting, because in Ariel the quoting *is* the distinction —
+ * a bare identifier is resolved against QRadar's normalised schema and a quoted
+ * one against the deployment's custom property list.
+ */
+export function isAqlCustomProperty(target: string | null | undefined): boolean {
+  return typeof target === 'string' && target.trim().startsWith('"');
 }
 
 /**
@@ -32,7 +57,9 @@ export interface FieldTargets {
  * for those read raw Sysmon or PowerShell events instead. Naming a plausible
  * model there would produce a query that runs against the wrong data.
  */
-export const CATEGORY_SOURCES: Record<string, { kql: string | null; spl: string | null; cql: string | null }> = {
+export const CATEGORY_SOURCES: Record<string, {
+  kql: string | null; spl: string | null; cql: string | null; aql?: string | null;
+}> = {
   process_creation: {
     kql: 'DeviceProcessEvents',
     spl: 'Endpoint.Processes',
@@ -442,6 +469,185 @@ for (const cat of ['ps_module', 'ps_classic_start'] as const) {
   FIELD_MAPPINGS[cat].Provider_Name ??= FIELD_MAPPINGS.ps_script.Provider_Name;
 }
 
+// ── QRadar / Ariel ─────────────────────────────────────────────────────────
+//
+// Added last and kept in one block, because AQL's mapping story is structurally
+// different from the other three and mixing it in above would hide that.
+//
+// There is exactly one Ariel table for log telemetry, `events`, so there is no
+// per-category source selection to make — the discriminating work that
+// DeviceProcessEvents does in KQL is done in AQL by a predicate on logsourceid,
+// category or qid. `flows` exists but holds QRadar's own network flow records,
+// not forwarded logs, so no Sigma category maps to it.
+//
+// The split that matters is per *field*, not per category. QRadar normalises the
+// network and identity envelope, and those targets are given bare and lower
+// case. Everything else is a Custom Event Property, given quoted, and the quotes
+// mean "this name is a convention in most deployments and a guess in yours".
+// Nothing here is corroborated: there are zero AQL rules in the corpus.
+for (const cat of Object.keys(CATEGORY_SOURCES)) {
+  CATEGORY_SOURCES[cat].aql = 'events';
+}
+
+/**
+ * Normalised properties that map cleanly, wherever the category uses them.
+ *
+ * These are the mappings worth trusting. `username`, `sourceip` and
+ * `destinationport` are populated by QRadar's own normalisation rather than by
+ * a customer's property extraction, so unlike a CEP they are the same in every
+ * deployment.
+ */
+const AQL_NORMALISED: Record<string, string> = {
+  User: 'username',
+  TargetUserName: 'username',
+  SourceIp: 'sourceip',
+  DestinationIp: 'destinationip',
+  SourcePort: 'sourceport',
+  DestinationPort: 'destinationport',
+  src_ip: 'sourceip',
+  dst_ip: 'destinationip',
+  'c-ip': 'sourceip',
+  'cs-username': 'username',
+};
+
+const AQL_TARGETS: Record<string, Record<string, string | null>> = {
+  process_creation: {
+    Image: '"Process Path"',
+    CommandLine: '"Process CommandLine"',
+    ParentImage: '"Parent Process Path"',
+    ParentCommandLine: '"Parent Process CommandLine"',
+    Hashes: '"File Hash"',
+    sha256: '"SHA256 Hash"',
+    md5: '"MD5 Hash"',
+    OriginalFileName: null,
+    IntegrityLevel: null,
+    CurrentDirectory: null,
+    Company: null,
+    Product: null,
+    Description: null,
+    LogonId: null,
+  },
+  network_connection: {
+    Image: '"Process Path"',
+    DestinationHostname: '"Destination Hostname"',
+    Protocol: 'protocolid',
+    Initiated: 'eventdirection',
+    DestinationIsIpv6: null,
+  },
+  dns_query: {
+    QueryName: '"DNS Query Name"',
+    query: '"DNS Query Name"',
+    answer: '"DNS Answer"',
+    Image: '"Process Path"',
+    QueryStatus: null,
+  },
+  dns: {
+    query: '"DNS Query Name"',
+    answer: '"DNS Answer"',
+    record_type: '"DNS Record Type"',
+    parent_domain: null,
+  },
+  file_event: {
+    TargetFilename: '"File Path"',
+    Image: '"Process Path"',
+    CreationUtcTime: 'devicetime',
+    Hashes: '"File Hash"',
+  },
+  registry_event: {
+    TargetObject: '"Registry Key Path"',
+    Details: '"Registry Value Data"',
+    NewName: '"Registry Value Name"',
+    Image: '"Process Path"',
+    EventType: null,
+    ImagePath: '"Registry Value Data"',
+  },
+  authentication: {
+    SubjectUserName: '"Source User"',
+    IpAddress: 'sourceip',
+    WorkstationName: 'identityhostname',
+    LogonType: '"Logon Type"',
+    Status: 'qid',
+    EventID: 'qid',
+  },
+  // QRadar's strongest ground. Proxy, web and firewall logs are what it was
+  // built to ingest, so these arrive through a vendor DSM rather than a
+  // hand-rolled property extraction and the names are more stable than the
+  // endpoint CEPs above.
+  webserver: {
+    'cs-uri-query': '"URL"',
+    'cs-uri-stem': '"URL Path"',
+    'cs-uri': '"URL"',
+    'cs-method': '"HTTP Method"',
+    'sc-status': '"HTTP Response Code"',
+    'cs-user-agent': '"User Agent"',
+    'cs-referer': '"HTTP Referrer"',
+    'cs-host': '"HTTP Host"',
+  },
+  proxy: {
+    'c-uri': '"URL"',
+    'cs-uri': '"URL"',
+    'c-uri-query': '"URL"',
+    'c-useragent': '"User Agent"',
+    'cs-method': '"HTTP Method"',
+    'cs-host': '"HTTP Host"',
+    'sc-status': '"HTTP Response Code"',
+    'cs-bytes': 'sourcebytes',
+  },
+};
+
+/** Notes attached where the mapping is lossy in a way that changes the query. */
+const AQL_NOTES: Record<string, string> = {
+  ParentCommandLine:
+    'Rarely extracted as a property. Most Windows DSMs surface the parent image but not the ' +
+    'parent command line; if it is needed, confirm the CEP exists before relying on it.',
+  Protocol:
+    'Sigma names the protocol (tcp/udp); Ariel stores protocolid as a number. Compare against ' +
+    'the numeric IANA value, or render it with a lookup for display only.',
+  Initiated:
+    'Sigma Initiated is a boolean. Ariel expresses direction as eventdirection, whose values ' +
+    'depend on how the log source is configured — confirm rather than assuming L2R/R2L.',
+  Status:
+    'Authentication success and failure are not a field in QRadar; they are encoded in the QID ' +
+    'and its category. Filter on category or qid rather than looking for a status property.',
+  EventID:
+    'Windows event IDs do not survive normalisation as a queryable property. QRadar maps each ' +
+    'to a QID, and that mapping belongs to the installed DSM — so a qid filter is correct only ' +
+    'for the deployment it was written against.',
+  WorkstationName:
+    'identityhostname is populated only when asset identity resolution is enabled and has seen ' +
+    'the host. It is empty rather than wrong when it is not.',
+  CreationUtcTime:
+    'devicetime is the timestamp the device reported, not a file creation time. The closest ' +
+    'available property, and not the same thing — say so if the rule depends on file times.',
+  'cs-bytes':
+    'sourcebytes is a flow property. On an event it is populated only if the DSM maps it, so ' +
+    'confirm before filtering on volume.',
+};
+
+for (const [cat, targets] of Object.entries(AQL_TARGETS)) {
+  const table = FIELD_MAPPINGS[cat];
+  if (!table) continue;
+  for (const [field, target] of Object.entries(targets)) {
+    if (!table[field]) continue;
+    table[field].aql = target;
+    if (AQL_NOTES[field] && !table[field].note) table[field].note = AQL_NOTES[field];
+  }
+}
+
+// The normalised set applies across every category that references the field,
+// and is applied after the per-category table so it wins. These are the only
+// AQL targets in this file that do not depend on a deployment's property
+// configuration.
+for (const table of Object.values(FIELD_MAPPINGS)) {
+  for (const [field, target] of Object.entries(AQL_NORMALISED)) {
+    if (table[field]) table[field].aql = target;
+  }
+  // CommandLine appears across categories via the cross-category loop above.
+  if (table.CommandLine && table.CommandLine.aql === undefined) {
+    table.CommandLine.aql = '"Process CommandLine"';
+  }
+}
+
 /**
  * Categories deliberately left unmapped, and why.
  *
@@ -472,20 +678,28 @@ export const UNMAPPED_CATEGORIES: Record<string, string> = {
  * Getting a modifier wrong is a quieter error than a wrong field name but has
  * the same effect: `|endswith` rendered as equality matches nothing.
  */
-export const MODIFIER_TRANSLATION: Record<string, { kql: string; spl: string; cql: string }> = {
-  contains: { kql: 'has (term) or contains (substring)', spl: '="*value*"', cql: '=/value/ or =*value*' },
-  startswith: { kql: 'startswith', spl: '="value*"', cql: '=/^value/' },
-  endswith: { kql: 'endswith', spl: '="*value"', cql: '=/value$/' },
-  all: { kql: 'has_all, or chained and', spl: 'AND between predicates', cql: 'separate | stages' },
-  re: { kql: 'matches regex', spl: '| regex field="pattern"', cql: '=/pattern/' },
-  base64: { kql: 'base64_decode_tostring, then match', spl: '| eval d=base64decode(f)', cql: 'base64Decode()' },
-  base64offset: { kql: 'match all three offset encodings', spl: 'match all three offset encodings', cql: 'match all three offset encodings' },
-  cidr: { kql: 'ipv4_is_in_range', spl: 'CIDR match via where cidrmatch()', cql: 'cidr(field, subnet=…)' },
-  windash: { kql: 'has_any over - / – / — variants', spl: 'OR over dash variants', cql: 'regex alternation over dash variants' },
-  lt: { kql: '<', spl: '<', cql: '<' },
-  lte: { kql: '<=', spl: '<=', cql: '<=' },
-  gt: { kql: '>', spl: '>', cql: '>' },
-  gte: { kql: '>=', spl: '>=', cql: '>=' },
+export const MODIFIER_TRANSLATION: Record<string, { kql: string; spl: string; cql: string; aql: string }> = {
+  contains: { kql: 'has (term) or contains (substring)', spl: '="*value*"', cql: '=/value/ or =*value*',
+    aql: "ILIKE '%value%' — or TEXT SEARCH 'value' against the raw payload, which is indexed" },
+  startswith: { kql: 'startswith', spl: '="value*"', cql: '=/^value/', aql: "ILIKE 'value%'" },
+  endswith: { kql: 'endswith', spl: '="*value"', cql: '=/value$/', aql: "ILIKE '%value'" },
+  all: { kql: 'has_all, or chained and', spl: 'AND between predicates', cql: 'separate | stages',
+    aql: 'AND between predicates' },
+  re: { kql: 'matches regex', spl: '| regex field="pattern"', cql: '=/pattern/',
+    aql: "MATCHES 'pattern', or IMATCHES for case-insensitive. Not REGEXP or ~" },
+  base64: { kql: 'base64_decode_tostring, then match', spl: '| eval d=base64decode(f)', cql: 'base64Decode()',
+    aql: 'No decode function in Ariel. Match the encoded string itself, or decode downstream — ' +
+      'and say which, because they detect different things' },
+  base64offset: { kql: 'match all three offset encodings', spl: 'match all three offset encodings', cql: 'match all three offset encodings',
+    aql: 'Match all three offset encodings as literal strings; Ariel cannot decode' },
+  cidr: { kql: 'ipv4_is_in_range', spl: 'CIDR match via where cidrmatch()', cql: 'cidr(field, subnet=…)',
+    aql: "INCIDR('10.0.0.0/8', sourceip) — subnet first, then the property" },
+  windash: { kql: 'has_any over - / – / — variants', spl: 'OR over dash variants', cql: 'regex alternation over dash variants',
+    aql: 'OR over the dash variants with ILIKE' },
+  lt: { kql: '<', spl: '<', cql: '<', aql: '<' },
+  lte: { kql: '<=', spl: '<=', cql: '<=', aql: '<=' },
+  gt: { kql: '>', spl: '>', cql: '>', aql: '>' },
+  gte: { kql: '>=', spl: '>=', cql: '>=', aql: '>=' },
 };
 
 export function categoriesWithMappings(): string[] {

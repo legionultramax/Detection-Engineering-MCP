@@ -9,11 +9,27 @@
 // Nothing here asks a model anything. Every check is a regex or a set lookup.
 
 import {
-  SPECS, extract, locallyDefinedNames, type LanguageId,
+  SPECS, extract, locallyDefinedNames, classifyAqlProperties, type LanguageId,
 } from '../../reference/query-languages/index.js';
+import { AQL_EVENT_PROPERTIES, AQL_TABLES } from '../../reference/query-languages/aql.js';
 import { getFieldCatalog, getCatalogError, nearest } from '../../reference/field-catalog/load.js';
 
 export type Severity = 'blocking' | 'warning';
+
+/**
+ * Where the query is going, which changes what counts as an error.
+ *
+ * Only AQL uses this, and only for the two rules that encode the hunt
+ * backend's behaviour rather than the language's. A query bound for the Phase 2
+ * pipeline must not carry its own START/STOP or domainId, because the backend
+ * appends both; a query being pasted into the QRadar console must carry a time
+ * bound or it scans everything. Both are true, and a validator that enforced
+ * one of them unconditionally would be wrong half the time.
+ */
+export type SubmissionContext = 'hunt-pipeline' | 'standalone';
+
+/** Rules that only apply when the hunt backend is going to rewrite the query. */
+const PIPELINE_ONLY_RULES = new Set(['aql.time-bound-in-query', 'aql.domain-id-in-query']);
 
 export interface Finding {
   kind: string;
@@ -29,11 +45,13 @@ export interface Finding {
 
 export interface ValidationResult {
   language: LanguageId;
+  /** AQL only — echoed so a caller can see which rule set was applied. */
+  submissionContext?: SubmissionContext;
   valid: boolean;
   blocking: Finding[];
   warnings: Finding[];
   /** What the validator understood the query to reference. */
-  observed: { sources: string[]; fields: string[]; macros: string[] };
+  observed: { sources: string[]; fields: string[]; macros: string[]; customProperties?: string[] };
   /** Per-field confidence, so a caller can label output honestly. */
   confidence: {
     tier: 'confirmed' | 'community' | 'unconfirmed';
@@ -48,7 +66,11 @@ export interface ValidationResult {
 /** Cap the number of same-kind findings so one bad query cannot flood a response. */
 const MAX_PER_KIND = 8;
 
-export function validateQuery(query: string, language: LanguageId): ValidationResult {
+export function validateQuery(
+  query: string,
+  language: LanguageId,
+  submissionContext: SubmissionContext = 'hunt-pipeline'
+): ValidationResult {
   const spec = SPECS[language];
   const catalog = getFieldCatalog();
   const observed = extract(query, language);
@@ -66,6 +88,11 @@ export function validateQuery(query: string, language: LanguageId): ValidationRe
   // --- 1. Spec prohibitions ------------------------------------------------
   // Pure pattern rules, defined alongside the language they constrain.
   for (const p of spec.prohibitions) {
+    // Two AQL rules describe the hunt backend, not the language. Outside that
+    // pipeline they are not merely irrelevant — enforcing the time-bound rule
+    // on a console query would reject the one thing that query must have.
+    if (submissionContext === 'standalone' && PIPELINE_ONLY_RULES.has(p.id)) continue;
+
     let re: RegExp;
     try {
       re = new RegExp(p.pattern, p.flags ?? '');
@@ -90,7 +117,64 @@ export function validateQuery(query: string, language: LanguageId): ValidationRe
   }
 
   // --- 2. Source validation (table / data model / event) -------------------
-  if (catalog) {
+  //
+  // AQL is checked first and separately because it is the one language here
+  // with no corpus behind it. The derived catalog cannot help — there are zero
+  // AQL rules to derive from — so the check is against QRadar's own normalised
+  // schema, which is the part of Ariel that is identical in every deployment.
+  if (language === 'aql') {
+    for (const s of observed.sources) {
+      if (!AQL_TABLES.includes(s)) {
+        push({
+          kind: 'unknown_ariel_table', severity: 'blocking',
+          title: `Unknown Ariel table: ${s}`,
+          reason:
+            `Ariel has exactly two tables, ${AQL_TABLES.join(' and ')}. ${s} is neither, so this ` +
+            'query cannot run. A table name borrowed from another SIEM is the usual cause.',
+          fix: 'Select FROM events for log telemetry, or FROM flows for QRadar network flows.',
+          subject: s,
+          suggestions: nearest(s, [...AQL_TABLES]),
+        });
+      }
+    }
+
+    const { unknown } = classifyAqlProperties(observed.fields, local);
+    for (const f of unknown) {
+      push({
+        kind: 'unknown_ariel_property', severity: 'blocking',
+        title: `Not a normalised Ariel property: ${f}`,
+        reason:
+          `${f} is written as a bare identifier, which Ariel resolves against QRadar's ` +
+          'normalised schema — and it is not in it. If this is meant to be a Custom Event ' +
+          'Property it must be double-quoted, and unquoted it will not resolve.',
+        fix: `Quote it as "${f}" if it is a custom property, or use a normalised property.`,
+        subject: f,
+        suggestions: nearest(f, [...AQL_EVENT_PROPERTIES]),
+      });
+    }
+
+    // Every CEP the query names. Not an error — it is how QRadar carries
+    // endpoint telemetry — but it is the single most likely reason a
+    // syntactically perfect AQL query returns nothing, so it is always said.
+    const ceps = observed.customProperties ?? [];
+    if (ceps.length > 0) {
+      unverifiedFields.push(...ceps);
+      push({
+        kind: 'custom_event_properties', severity: 'warning',
+        title: `${ceps.length} Custom Event Propert${ceps.length === 1 ? 'y' : 'ies'} referenced`,
+        reason:
+          `${ceps.map(c => `"${c}"`).join(', ')} — these are not part of QRadar. Each is a regex ` +
+          'or JSON extraction configured per log source in the target deployment, so the names ' +
+          'are conventions rather than facts. An unconfigured or differently-named property is ' +
+          'null rather than an error, which means the query runs, returns zero rows, and looks ' +
+          'exactly like a clean environment.',
+        fix:
+          'Confirm each name against the deployment\'s custom property list before treating a ' +
+          'zero-row result as evidence of absence. Where a property is missing, TEXT SEARCH over ' +
+          'the payload finds the events without needing it.',
+      });
+    }
+  } else if (catalog) {
     if (language === 'kql') {
       const known = Object.keys(catalog.kql.tables);
       const core = new Set(Object.keys(catalog.kql.coreTables));
@@ -316,16 +400,24 @@ export function validateQuery(query: string, language: LanguageId): ValidationRe
       : tier === 'community'
         ? 'Event names come from an unofficial community extraction. Verify against the ' +
           'authority link before relying on this in production.'
-        : 'Field names are conventional guesses and have not been verified against a deployment.';
+        : language === 'aql'
+          ? 'There are no AQL rules in the corpus, so nothing here is corroborated. Normalised ' +
+            'Ariel properties were checked against QRadar\'s own schema; every quoted Custom ' +
+            'Event Property is a per-deployment convention that only the target installation ' +
+            'can confirm.'
+          : 'Field names are conventional guesses and have not been verified against a deployment.';
 
   return {
     language,
+    ...(language === 'aql' ? { submissionContext } : {}),
     valid: blocking.length === 0,
     blocking,
     warnings,
     observed,
     confidence: { tier, note, unverifiedFields },
     authority: spec.authority,
-    catalogAvailable: Boolean(catalog),
+    // AQL never consults the derived catalog, so reporting its availability
+    // would imply a check that did not happen either way.
+    catalogAvailable: language === 'aql' ? false : Boolean(catalog),
   };
 }

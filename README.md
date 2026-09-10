@@ -2,7 +2,7 @@
 
 **Detection Engineering Command Center for Claude Code**
 
-A Model Context Protocol (MCP) server purpose-built for detection engineers. Indexes 15,100+ detection rules from five major detection ecosystems (Sigma, KQL/Sentinel, Splunk ESCU, Elastic, Sublime), enriches them with MITRE ATT&CK v18.1, Atomic Red Team, LOLBAS, LOLFarm (lolol.farm), and 15+ threat intelligence sources — then exposes everything through 132 tools and 15 project-scoped Claude Code skills that implement the full detection engineering lifecycle.
+A Model Context Protocol (MCP) server purpose-built for detection engineers. Indexes 15,100+ detection rules from five major detection ecosystems (Sigma, KQL/Sentinel, Splunk ESCU, Elastic, Sublime), enriches them with MITRE ATT&CK v18.1, Atomic Red Team, LOLBAS, LOLFarm (lolol.farm), and 15+ threat intelligence sources — then exposes everything through 132 tools and 16 project-scoped Claude Code skills that implement the full detection engineering lifecycle. Detections can be authored or translated into **KQL, SPL, CQL or QRadar AQL**, with a deterministic validation gate on every query.
 
 The primary output is **kill-chain correlated queries** (KQL + SPL + Sigma), not isolated atomic rules.
 
@@ -218,8 +218,9 @@ npm run lint            # tsc --noEmit --strict
 npm run tools:check     # tool count matches the documentation
 npm run verify:readonly # 53 checks — read-only really is read-only
 npm run verify:search   # 36 checks — FTS5, ranking, injection safety
-npm run verify:queries  # 94 checks — language specs and the validation gate
+npm run verify:queries  # 95 checks — language specs and the validation gate
 npm run verify:coverage # 16 checks — translation brief coverage
+npm run verify:aql      # 74 checks — QRadar AQL spec, validation, pipeline constraints
 npm run verify:http     # 26 checks — the HTTP transport, on an ephemeral port
 npm test                # 138 checks (needs a writable database)
 ```
@@ -230,7 +231,7 @@ All of these are local and offline. `npm test` writes, so run it against a copy.
 
 ## Detection Engineering Skills
 
-Fifteen project-scoped Claude Code skills implement the detection engineering lifecycle. Each skill is a self-contained workflow that calls MCP tools — nothing is hallucinated from training data.
+Sixteen project-scoped Claude Code skills implement the detection engineering lifecycle. Each skill is a self-contained workflow that calls MCP tools — nothing is hallucinated from training data.
 
 ```mermaid
 flowchart TB
@@ -502,6 +503,42 @@ Pre-seeded mappings that bridge EventID → MITRE Data Source/Component across 1
 | `get_learnings` | Get learnings by topic |
 | `get_knowledge_summary` | Summary of knowledge graph contents |
 
+### Query Language Tools (3)
+
+| Tool | Description |
+|---|---|
+| `get_query_language_spec` | Data model, operator/index table, cost model, prohibitions and worked examples for KQL, SPL, CQL or AQL. Call before writing a query |
+| `validate_query` | Deterministic gate. Checks every table, field, data model, event name and Splunk macro against the derived catalog and enforces per-language prohibitions. No model judgement involved |
+| `translate_detection` | Builds a translation brief for porting a rule to another language — field mappings graded for confidence, modifiers in use, shape-matched examples. Returns a brief, never a query |
+
+Four target languages: **KQL** (Sentinel/Defender), **SPL** (Splunk), **CQL** (CrowdStrike Falcon
+LogScale) and **AQL** (IBM QRadar Ariel).
+
+The division is deliberate: the tools supply truth, the model supplies fluency, and a deterministic
+gate decides whether the result ships. `validate_query` exists because a wrong field name produces a
+query that parses, runs and returns zero rows — which is indistinguishable from "no malicious
+activity". A blocking error is a strictly better outcome than silence.
+
+**AQL is graded differently from the other three**, and the difference is not cosmetic. KQL is
+checked against 5,509 real rules and SPL against 2,185; there are **zero AQL rules in the corpus**,
+so nothing about it can be corroborated the same way. More importantly, QRadar normalises only the
+network and identity envelope — `sourceip`, `destinationport`, `username`, `qid`. Every process,
+file, registry and command-line field is a **Custom Event Property**, extracted per log source by
+whoever onboarded it, so the names differ between customers and an unconfigured one is *null rather
+than an error*. The validator therefore checks bare identifiers against QRadar's own schema and
+reports every quoted CEP as unverifiable, every time.
+
+It also enforces three constraints that belong to the hunt pipeline rather than to Ariel:
+
+| Constraint | Why |
+|---|---|
+| No hand-written `START`/`STOP` or `LAST n HOURS` | The Phase 2 backend appends the range. A second time clause either fails to parse or silently narrows what the analyst asked for |
+| No hand-written `domainId` | The backend injects it for tenant isolation. A conflicting predicate returns zero rows |
+| Aggregation warned above 7 days | Longer ranges are split into one query per day and the CSVs concatenated. Each chunk aggregates only its own day, so a `COUNT` comes back as a stack of daily partials that nothing re-adds |
+
+Pass `submission_context: "standalone"` to `validate_query` for AQL headed to the QRadar console by
+hand, where a time bound is required rather than forbidden.
+
 ### Sublime Security & Report Generator
 
 | Tool | Description |
@@ -636,19 +673,20 @@ security-detections-mcp/
 
 ---
 
-## How the detect-engineer Skill Works
+## How rule authoring works
 
-The detect-engineer skill is the core rule authoring pipeline. When you ask "write a detection for X", it runs a 7-step process:
+The pipeline is in [CLAUDE.md](CLAUDE.md) (the WAT stages) rather than in a skill — the
+`detect-engineer` skill it used to live in is not in this repository. When you ask for a detection:
 
-1. **Classify** — New rule, fix/tune, convert, or validate? Which platform(s)?
-2. **Coverage assessment** — Parallel queries: `list_by_mitre`, `search_entities`, `get_learnings`, `get_lolfarm_context`, and `lookup_lolbas` (for binaries)
+1. **Classify** — New rule, fix/tune, convert, or validate? Which platform?
+2. **Coverage assessment** — Parallel: `list_by_mitre`, `search_entities`, `get_learnings`, `get_lolfarm_context`, and `lookup_lolbas` for any binary
 3. **Coverage gate** — Score existing coverage. ≥95% = refine path. <95% = build path. Zero = full build.
-4. **Author** — Behavioral invariant analysis (what's hard for the attacker to change?), narrowing test (would an admin trigger this?), evasion test (can the attacker bypass by renaming one thing?). FP filters sourced per-logsource from reference files.
-5. **Validate** — 6-dimension scoring: Evasion, Fields, Paths, FP, Syntax, LOLFarm. Composite < 3.0 triggers iteration.
-6. **Output** — Structured format with coverage score, validation matrix, FP documentation, data requirements, and gaps.
-7. **Persist** — Entities, learnings, and decisions saved to knowledge graph for future sessions.
+4. **Author** — Behavioural invariant analysis (what is hard for the attacker to change?), narrowing test (would an admin trigger this?), evasion test (can it be bypassed by renaming one thing?)
+5. **Validate** — `validate_query` runs the deterministic checks; the 5-dimension score is judgement on top of that, not instead of it. Composite < 3.0 triggers iteration.
+6. **Output** — Coverage score, validation matrix, FP documentation, data requirements, gaps
+7. **Persist** — Entities, learnings and decisions to the knowledge graph
 
-**Platform disambiguation:** "Splunk"/"SPL" → bare SPL query. "ESCU"/"security_content" → full YAML with tstats + RBA + tests. "Elastic TOML" → `.toml` rule file. "KQL"/"Sentinel" → bare KQL. Default = Sigma only.
+**Platform disambiguation:** "Splunk"/"SPL" → bare SPL. "ESCU"/"security_content" → full YAML with tstats + RBA + tests. "Elastic TOML" → `.toml` rule file. "KQL"/"Sentinel" → bare KQL. "QRadar"/"AQL" → Ariel SQL. Default = Sigma only.
 
 ---
 

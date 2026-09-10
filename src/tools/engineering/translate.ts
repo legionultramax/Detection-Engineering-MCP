@@ -15,7 +15,9 @@ import { runQuery } from '../../db/connection.js';
 import { SPECS, type LanguageId } from '../../reference/query-languages/index.js';
 import {
   FIELD_MAPPINGS, CATEGORY_SOURCES, MODIFIER_TRANSLATION, categoriesWithMappings,
+  isAqlCustomProperty,
 } from '../../reference/query-languages/field-mappings.js';
+import { AQL_EVENT_PROPERTIES } from '../../reference/query-languages/aql.js';
 import { getFieldCatalog } from '../../reference/field-catalog/load.js';
 
 export interface MappedField {
@@ -151,6 +153,14 @@ function mapFields(
       continue;
     }
     const to = t[target];
+    if (to === undefined) {
+      // A key that was never authored, which is not the same claim as a null.
+      // Reporting "no equivalent exists" when the truth is "nobody wrote one
+      // down" would turn a gap in this file into an assertion about the target
+      // platform.
+      unmappable.push(f);
+      continue;
+    }
     if (!to) {
       mapped.push({
         sigmaField: f, target: null, confidence: 'none',
@@ -183,6 +193,29 @@ function mapFields(
           evidence = `Appears in ${catalog.spl.fields[to]} ESCU rule(s).`;
         } else {
           evidence = 'Not seen in the ESCU corpus. It may exist in the target CIM version.';
+        }
+      } else if (target === 'aql') {
+        // Two genuinely different kinds of claim, and collapsing them would be
+        // the most misleading thing this file could do. A normalised Ariel
+        // property is the same in every QRadar; a Custom Event Property is a
+        // name someone chose while onboarding a log source at one customer.
+        if (isAqlCustomProperty(to)) {
+          confidence = 'unconfirmed';
+          evidence =
+            'Custom Event Property. Not part of QRadar — it is extracted per log source by the ' +
+            'target deployment, so this name is a common convention and nothing more. If it ' +
+            'differs or is not configured, the property is null and the query returns zero rows ' +
+            'with no error.';
+        } else if (AQL_EVENT_PROPERTIES.has(String(to).toLowerCase())) {
+          confidence = 'confirmed';
+          evidence =
+            `${to} is a normalised Ariel property, populated by QRadar itself rather than by a ` +
+            'per-deployment extraction, so it is present in every installation.';
+        } else {
+          confidence = 'unconfirmed';
+          evidence =
+            `${to} is neither a normalised Ariel property nor quoted as a custom one. Verify it ` +
+            'before use.';
         }
       } else {
         // CQL fields are not enumerated by the dictionary — it lists events, not
@@ -343,9 +376,19 @@ export function buildTranslationBrief(
            'substituting something approximate.']
         : []),
       ...(lowConfidence.length > 0
-        ? [`${lowConfidence.length} mapping(s) are not corroborated by the catalog: ` +
-           `${lowConfidence.map(f => `${f.sigmaField}->${f.target}`).join(', ')}. A wrong field ` +
-           'name produces a query that runs and returns zero rows.']
+        ? target === 'aql'
+          // There is no AQL catalog to be uncorroborated by. Saying so would
+          // point the reader at a missing build step instead of the real
+          // reason, which is that these names belong to the customer's QRadar.
+          ? [`${lowConfidence.length} mapping(s) are Custom Event Properties, named per ` +
+             `deployment: ${lowConfidence.map(f => `${f.sigmaField}->${f.target}`).join(', ')}. ` +
+             'QRadar does not define these — whoever onboarded the log source did. If a name ' +
+             'differs or the property was never extracted, it is null rather than an error, so ' +
+             'the query returns zero rows and reads as a clean environment. Name them in your ' +
+             'output so the analyst can check them against the deployment.']
+          : [`${lowConfidence.length} mapping(s) are not corroborated by the catalog: ` +
+             `${lowConfidence.map(f => `${f.sigmaField}->${f.target}`).join(', ')}. A wrong field ` +
+             'name produces a query that runs and returns zero rows.']
         : []),
       ...(complexity.warning ? [complexity.warning] : []),
       ...(category === null
@@ -361,6 +404,21 @@ export function buildTranslationBrief(
       'Then call validate_query with this target language. Do not present the query before it validates.',
       'State any field marked unconfirmed or community, and anything you could not express, ' +
         'alongside the query. Do not present a guess as a fact.',
+      ...(target === 'aql'
+        ? [
+            'Do not write a time bound or a domainId — the hunt backend appends both before ' +
+              'submitting, and a second copy either fails to parse or silently narrows the range ' +
+              'the analyst asked for.',
+            'Ariel has no JOIN. If the rule needs more than one event shape correlated, emit one ' +
+              'query per shape and describe the correlation in the hypothesis text rather than ' +
+              'forcing it into a single query.',
+            'Keep every quoted Custom Event Property in the output visible to the analyst. Those ' +
+              'names are the deployment-specific part, and a zero-row result usually means one of ' +
+              'them is wrong rather than that the environment is clean.',
+            'If the hunt range may exceed 7 days, avoid GROUP BY and aggregate functions: the ' +
+              'backend chunks daily and concatenates, so an aggregate comes back computed per day.',
+          ]
+        : []),
     ],
 
     availableCategories: categoriesWithMappings(),

@@ -219,7 +219,8 @@ caller spend a turn on one that cannot work.
 ```bash
 npm run verify:readonly   # 53  read-only really is read-only
 npm run verify:search     # 36  FTS5, ranking, query-syntax safety
-npm run verify:queries    # 94  language specs and the validation gate
+npm run verify:queries    # 95  language specs and the validation gate
+npm run verify:aql        # 74  QRadar AQL spec, validation, pipeline constraints
 npm run verify:coverage   # 16  translation brief coverage
 npm run verify:http       # 26  the HTTP transport, on an ephemeral port
 npm test                  # 138 full contract suite — needs a writable database

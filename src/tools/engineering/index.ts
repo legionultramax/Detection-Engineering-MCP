@@ -5,6 +5,7 @@ import { defineTool, type ToolDefinition } from '../registry.js';
 import {
   SPECS, LANGUAGE_IDS, normaliseLanguage, SHARED_PRINCIPLES, type LanguageId,
 } from '../../reference/query-languages/index.js';
+import { AQL_EVENT_PROPERTIES, AQL_TABLES } from '../../reference/query-languages/aql.js';
 import { getFieldCatalog } from '../../reference/field-catalog/load.js';
 import { validateQuery } from './validate.js';
 import { buildTranslationBrief } from './translate.js';
@@ -25,18 +26,19 @@ const getQueryLanguageSpec = defineTool({
   description:
     'Get the authoring specification for a detection query language: data model, ' +
     'operator/index table, cost model, hard prohibitions, and worked examples. Call this BEFORE ' +
-    'writing a query in KQL (Microsoft Sentinel/Defender), SPL (Splunk), or CQL (CrowdStrike ' +
-    'Falcon LogScale). Pass a shape (process_creation, network_connection, dns_query, ' +
-    'file_event, registry_event, authentication, credential_access) to get examples matched to ' +
-    'the detection you are writing instead of a generic set. Returns roughly 1,500 tokens.',
+    'writing a query in KQL (Microsoft Sentinel/Defender), SPL (Splunk), CQL (CrowdStrike ' +
+    'Falcon LogScale), or AQL (IBM QRadar Ariel). Pass a shape (process_creation, ' +
+    'network_connection, dns_query, file_event, registry_event, authentication, ' +
+    'credential_access) to get examples matched to the detection you are writing instead of a ' +
+    'generic set. Returns roughly 1,500 tokens.',
   inputSchema: {
     type: 'object',
     properties: {
       language: {
         type: 'string',
         description:
-          'kql | spl | cql. Aliases accepted: kusto, sentinel, defender, splunk, escu, ' +
-          'crowdstrike, logscale, humio, falcon.',
+          'kql | spl | cql | aql. Aliases accepted: kusto, sentinel, defender, splunk, escu, ' +
+          'crowdstrike, logscale, humio, falcon, ariel, qradar.',
       },
       shape: {
         type: 'string',
@@ -74,7 +76,36 @@ const getQueryLanguageSpec = defineTool({
       available: false,
       note: 'Field catalog not built — run npm run catalog:build. Field names are unverified.',
     };
-    if (catalog) {
+    if (lang === 'aql') {
+      // AQL's vocabulary does not come from the catalog and cannot — there are
+      // zero AQL rules to derive one from. What can be stated is QRadar's own
+      // normalised schema, which is identical everywhere, and the fact that
+      // everything outside it is a per-deployment property. Handled before the
+      // catalog check so this is returned whether or not the catalog is built.
+      vocabulary = {
+        available: true,
+        confidence: 'unconfirmed',
+        derivedFrom:
+          'QRadar normalised event schema. No AQL rules exist in the local corpus, so unlike ' +
+          'the other languages nothing here is corroborated against real detections.',
+        tables: AQL_TABLES,
+        normalisedProperties: [...AQL_EVENT_PROPERTIES].sort(),
+        customPropertyWarning:
+          'Every process, file, registry and command-line field in QRadar is a Custom Event ' +
+          'Property: a regex or JSON extraction configured per log source by the customer. CEP ' +
+          'names are double-quoted and case-sensitive, and they differ between deployments. An ' +
+          'unconfigured CEP is null rather than an error, so the wrong name yields zero rows and ' +
+          'no diagnostic — the same result as a clean environment. Quote every CEP, and name ' +
+          'them explicitly in your output so the analyst can check them.',
+        pipelineConstraints: [
+          'Do not write START/STOP or LAST n HOURS — the hunt backend appends the range.',
+          'Do not write domainId — the backend injects it for tenant isolation.',
+          'Aggregation is only correct for ranges of 7 days or less; longer ranges are chunked ' +
+            'one query per day and the result sets are concatenated, not re-aggregated.',
+          'Ariel has no JOIN, UNION or subquery in FROM.',
+        ],
+      };
+    } else if (catalog) {
       if (lang === 'kql') {
         vocabulary = {
           available: true,
@@ -148,23 +179,38 @@ const validateQueryTool = defineTool({
   description:
     'Check a detection query deterministically before presenting it. Verifies every table, ' +
     'field, data model, event name and Splunk macro against a catalog derived from the local ' +
-    'detection corpus, and enforces per-language prohibitions. Call this on every KQL, SPL or ' +
-    'CQL query you generate. Blocking findings mean the query would fail or silently return ' +
+    'detection corpus, and enforces per-language prohibitions. Call this on every KQL, SPL, CQL ' +
+    'or AQL query you generate. Blocking findings mean the query would fail or silently return ' +
     'nothing and must be fixed; warnings mean it works but is slower or less portable than it ' +
-    'should be. Returns structured findings with suggested corrections.',
+    'should be. For AQL it also enforces the hunt pipeline\'s own constraints — no hand-written ' +
+    'time bound or domainId, and a warning when aggregation would be computed per chunk. ' +
+    'Returns structured findings with suggested corrections.',
   inputSchema: {
     type: 'object',
     properties: {
       query: { type: 'string', description: 'The query text to validate.' },
       language: {
         type: 'string',
-        description: 'kql | spl | cql (aliases accepted: sentinel, splunk, crowdstrike, logscale).',
+        description:
+          'kql | spl | cql | aql (aliases accepted: sentinel, splunk, crowdstrike, logscale, ' +
+          'qradar, ariel).',
+      },
+      submission_context: {
+        type: 'string',
+        enum: ['hunt-pipeline', 'standalone'],
+        description:
+          'AQL only. "hunt-pipeline" (default) is a query that will be submitted through the ' +
+          'Phase 2 backend, which appends its own START/STOP and domainId — so writing either ' +
+          'is a blocking error. Use "standalone" for AQL destined for the QRadar console by ' +
+          'hand, where the query must carry its own time bound.',
       },
     },
     required: ['query', 'language'],
   },
   handler: async (args) => {
-    const { query, language } = args as { query: string; language: string };
+    const { query, language, submission_context } = args as {
+      query: string; language: string; submission_context?: 'hunt-pipeline' | 'standalone';
+    };
     const lang = normaliseLanguage(language);
     if (!lang) {
       return {
@@ -177,7 +223,10 @@ const validateQueryTool = defineTool({
       return { error: true, message: 'No query provided.' };
     }
 
-    const result = validateQuery(String(query), lang);
+    const result = validateQuery(
+      String(query), lang,
+      submission_context === 'standalone' ? 'standalone' : 'hunt-pipeline'
+    );
     return {
       ...result,
       summary:
@@ -199,13 +248,15 @@ const validateQueryTool = defineTool({
 const translateDetection = defineTool({
   name: 'translate_detection',
   description:
-    'Build a translation brief for porting an existing detection into KQL, SPL or CQL. Retrieves ' +
-    'the real rule from the corpus and returns everything needed to translate it: the target ' +
-    'language spec, field-by-field mappings graded against the derived catalog, the Sigma ' +
-    'modifiers in use, shape-matched examples, and the prohibitions that apply. It deliberately ' +
-    'does NOT return a query — you write it from the brief, then call validate_query before ' +
-    'presenting it. Pass detection_id (from search_detections or list_by_mitre), or query plus ' +
-    'source_language for a rule you already have.',
+    'Build a translation brief for porting an existing detection into KQL, SPL, CQL or AQL ' +
+    '(QRadar). Retrieves the real rule from the corpus and returns everything needed to ' +
+    'translate it: the target language spec, field-by-field mappings graded against the derived ' +
+    'catalog, the Sigma modifiers in use, shape-matched examples, and the prohibitions that ' +
+    'apply. For AQL, mappings are graded as normalised Ariel properties (the same in every ' +
+    'QRadar) or Custom Event Properties (per-deployment, and the usual cause of a zero-row ' +
+    'result). It deliberately does NOT return a query — you write it from the brief, then call ' +
+    'validate_query before presenting it. Pass detection_id (from search_detections or ' +
+    'list_by_mitre), or query plus source_language for a rule you already have.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -223,7 +274,9 @@ const translateDetection = defineTool({
       },
       target_language: {
         type: 'string',
-        description: 'kql | spl | cql (aliases accepted: sentinel, splunk, crowdstrike, logscale).',
+        description:
+          'kql | spl | cql | aql (aliases accepted: sentinel, splunk, crowdstrike, logscale, ' +
+          'qradar, ariel).',
       },
       shape: {
         type: 'string',

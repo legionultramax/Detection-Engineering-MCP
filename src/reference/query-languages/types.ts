@@ -68,7 +68,7 @@ export interface SpecExample {
 }
 
 export interface LanguageSpec {
-  id: 'kql' | 'spl' | 'cql';
+  id: 'kql' | 'spl' | 'cql' | 'aql';
   name: string;
   engine: string;
   confidence: Confidence;
