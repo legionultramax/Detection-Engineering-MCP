@@ -89,6 +89,12 @@ repositories are only needed to build or refresh it, never to run.
 > Deploying to another machine, or moving an existing install? Follow
 > **[docs/MIGRATION-SOP.md](docs/MIGRATION-SOP.md)** instead — it covers the database, which is not
 > in this repository, and the transport and verification steps in order.
+>
+> Running this behind a **local model in Open WebUI** rather than Claude? See
+> **[docs/GEMMA-RUNBOOK.md](docs/GEMMA-RUNBOOK.md)**. `CLAUDE.md` does not apply there — it is a
+> Claude Code convention file, it names 50 tools a scoped deployment does not expose, and a third of
+> it describes a skill system and a browser that Open WebUI does not have. The runbook carries the
+> system prompt, the tool-routing rules and the wiring instead.
 
 ### Prerequisites
 - Node.js 18+

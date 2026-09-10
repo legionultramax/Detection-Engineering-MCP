@@ -204,6 +204,11 @@ node dist/index.js
 `initialize` returns an `Mcp-Session-Id` header; every subsequent request must echo it back. There
 is an unauthenticated `/health` endpoint for liveness checks.
 
+**Open WebUI connects to this directly.** Native MCP support landed in v0.6.31 and is Streamable
+HTTP only, which is what this server speaks — `mcpo` is for bridging *stdio* servers and is not
+needed here. For the system prompt, tool-routing rules and model-side setup, see
+[GEMMA-RUNBOOK.md](GEMMA-RUNBOOK.md).
+
 **Security defaults, and why they are not warnings.** The listener binds `127.0.0.1` unless told
 otherwise, and **refuses to start on a non-loopback address without a token** — this server exposes
 a detection corpus and its tool surface, and an unauthenticated listener on `0.0.0.0` hands both to
