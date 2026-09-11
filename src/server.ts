@@ -31,6 +31,7 @@ import {
   sublimeTools,
   lolfarmTools,
   engineeringTools,
+  authoringTools,
 } from './tools/index.js';
 import type { ToolDefinition } from './tools/index.js';
 
@@ -52,6 +53,7 @@ function buildServerInstructions(): string {
     { label: 'LOLFarm (Living Off The Land)', tools: lolfarmTools },
     { label: 'Knowledge Graph', tools: knowledgeTools },
     { label: 'Sublime Security (Email)', tools: sublimeTools },
+    { label: 'Rule Authoring (start here)', tools: authoringTools },
     { label: 'Query Languages & Validation', tools: engineeringTools },
     { label: 'Reporting', tools: reportGeneratorTools },
   ];

@@ -150,6 +150,37 @@ console.log('\n=== 2. The scoped profile fits a 16K served context ===');
     full > 16384, `${full} tok`);
   check('profile is a large cut against the full surface', scoped < full / 3,
     `${scoped} vs ${full}`);
+
+  // The size of the definitions is only half the budget, and on its own it is a
+  // misleading half: the composite authoring tools made the resident cost
+  // *larger* while making a real session much smaller. So the property actually
+  // worth defending is end to end — definitions plus a full authoring turn have
+  // to leave the model room to think and answer.
+  const brief = await mod.toolRegistry.execute('build_authoring_brief',
+    { technique_id: 'T1059.001', language: 'kql' });
+  const briefTok = tok(JSON.stringify(brief).length);
+
+  let sixCalls = 0;
+  for (const [n, a] of [
+    ['lookup_mitre_technique', { technique_id: 'T1059.001' }],
+    ['list_by_mitre', { technique_id: 'T1059.001' }],
+    ['get_data_sources', { technique_id: 'T1059.001' }],
+    ['get_lolfarm_context', { technique_id: 'T1059.001', mode: 'summary' }],
+    ['lookup_lolbas', { binary: 'powershell.exe' }],
+    ['get_query_language_spec', { language: 'kql' }],
+  ]) sixCalls += tok(JSON.stringify(await mod.toolRegistry.execute(n, a)).length);
+
+  console.log(`        one authoring turn: definitions ${scoped} + brief ${briefTok} ` +
+    `= ${scoped + briefTok} tok  (the six calls it replaces: ${sixCalls} tok)`);
+
+  check('the composite brief costs less than the calls it replaces',
+    briefTok < sixCalls / 2, `${briefTok} vs ${sixCalls}`);
+  check('definitions + a full authoring turn stay under 60% of 16K',
+    scoped + briefTok < 16384 * 0.6, `${scoped + briefTok} tok`);
+  // The composites add resident cost. That only pays off because the saving per
+  // turn is larger — assert the trade rather than trusting it.
+  check('the per-turn saving exceeds what the composites cost to declare',
+    sixCalls - briefTok > 1000, `saving ${sixCalls - briefTok} tok`);
 }
 
 console.log('\n=== 3. The response budget actually binds ===');

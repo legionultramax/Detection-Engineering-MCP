@@ -98,6 +98,15 @@ export const PROFILES: Record<string, ToolProfile> = {
       'epss_score_lookup',
       'check_cisa_kev',
       'misp_warninglist_check',
+      // Composite authoring. These are the highest-leverage tools in the
+      // profile and belong at the front of it: build_authoring_brief replaces
+      // six separate calls that measured ~6,000 tokens together, and it carries
+      // the LOLBAS abuse matrix as data rather than leaving it to an
+      // instruction a small model can skip. synthesize_killchain computes the
+      // phase ordering, pivot and join idiom that WAT-42 previously asked the
+      // model to invent.
+      'build_authoring_brief',
+      'synthesize_killchain',
       // Translation grounding
       'convert_sigma_to_kql',
       // Query-language authoring. get_query_language_spec supplies the target

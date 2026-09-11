@@ -15,6 +15,7 @@ import { reportGeneratorTools, reportGeneratorToolCount } from './report-generat
 import { sublimeTools, sublimeToolCount } from './sublime/index.js';
 import { lolfarmTools, lolfarmToolCount } from './lolfarm/index.js';
 import { engineeringTools, engineeringToolCount } from './engineering/index.js';
+import { authoringTools, authoringToolCount } from './authoring/index.js';
 
 import { toolRegistry } from './registry.js';
 
@@ -29,6 +30,7 @@ export { reportGeneratorTools, reportGeneratorToolCount } from './report-generat
 export { sublimeTools, sublimeToolCount } from './sublime/index.js';
 export { lolfarmTools, lolfarmToolCount } from './lolfarm/index.js';
 export { engineeringTools, engineeringToolCount } from './engineering/index.js';
+export { authoringTools, authoringToolCount } from './authoring/index.js';
 
 export function registerAllTools(): void {
   // Register all tool modules
@@ -42,6 +44,7 @@ export function registerAllTools(): void {
   toolRegistry.registerAll(sublimeTools);
   toolRegistry.registerAll(lolfarmTools);
   toolRegistry.registerAll(engineeringTools);
+  toolRegistry.registerAll(authoringTools);
 
   console.error(`[tools] Registry initialized with ${toolRegistry.count()} tools`);
   console.error(`[tools] - Detections: ${detectionToolCount}`);
@@ -54,6 +57,7 @@ export function registerAllTools(): void {
   console.error(`[tools] - Sublime Security: ${sublimeToolCount}`);
   console.error(`[tools] - LOLFarm: ${lolfarmToolCount}`);
   console.error(`[tools] - Query Engineering: ${engineeringToolCount}`);
+  console.error(`[tools] - Authoring (composite): ${authoringToolCount}`);
 }
 
 export function getToolsSummary(): { total: number; names: string[]; threat_intel: number; byModule: Record<string, number> } {
@@ -72,6 +76,7 @@ export function getToolsSummary(): { total: number; names: string[]; threat_inte
       sublime: sublimeToolCount,
       lolfarm: lolfarmToolCount,
       engineering: engineeringToolCount,
+      authoring: authoringToolCount,
     },
   };
 }

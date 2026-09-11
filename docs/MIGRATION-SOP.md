@@ -66,7 +66,7 @@ broken install immediately:
 
 ```bash
 npm run lint          # tsc --noEmit --strict — must exit 0
-npm run tools:check   # must print: ok — 132 tools registered, documentation agrees
+npm run tools:check   # must print: ok — 134 tools registered, documentation agrees
 ```
 
 ## Step 3 — The database
@@ -238,7 +238,7 @@ A healthy stdio start looks like:
 
 ```
 [db] Initializing database at /abs/path/detections.db (read-only)
-[tools] Registry initialized with 132 tools
+[tools] Registry initialized with 134 tools
 [harris-hawkeye-mcp] read-only mode — 15176 detections available, indexing disabled
 [harris-hawkeye-mcp] Server started (v1.0.0 - Enhanced Edition, stdio)
 ```
@@ -259,7 +259,7 @@ A healthy stdio start looks like:
 | HTTP 400 on every request after `initialize` | The client is not sending back the `Mcp-Session-Id` header |
 | `npm ci` runs `node-gyp rebuild` | No `better-sqlite3` prebuild for your Node version. Pin Node 24 |
 | `.env` file ignored | There is no `dotenv` dependency. Use the process environment |
-| Tool count is not 132 | Stale build. `npm run build`, then `npm run tools:check` |
+| Tool count is not 134 | Stale build. `npm run build`, then `npm run tools:check` |
 | ART tools return nothing | Not indexed, deliberately. See Step 4 |
 
 ## Moving an existing installation

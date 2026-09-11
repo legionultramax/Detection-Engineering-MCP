@@ -84,8 +84,8 @@ fails — check this table rather than assuming a name.
 
 ## TOOL TIERS
 
-> This table describes the full 132-tool surface. When `HAWKEYE_TOOL_PROFILE` is set — the
-> `phase1-authoring` profile exposes 27 — most of the threat-intel, Abuse.ch, OTX and knowledge-graph
+> This table describes the full 134-tool surface. When `HAWKEYE_TOOL_PROFILE` is set — the
+> `phase1-authoring` profile exposes 29 — most of the threat-intel, Abuse.ch, OTX and knowledge-graph
 > rows below are simply absent. **Your own tool list is authoritative.** Work with what is there; do
 > not call a name because it appears here.
 

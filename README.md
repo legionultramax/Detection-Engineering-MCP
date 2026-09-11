@@ -2,11 +2,11 @@
 
 **Detection Engineering Command Center for Claude Code**
 
-A Model Context Protocol (MCP) server purpose-built for detection engineers. Indexes 15,100+ detection rules from five major detection ecosystems (Sigma, KQL/Sentinel, Splunk ESCU, Elastic, Sublime), enriches them with MITRE ATT&CK v18.1, Atomic Red Team, LOLBAS, LOLFarm (lolol.farm), and 15+ threat intelligence sources — then exposes everything through 132 tools and 16 project-scoped Claude Code skills that implement the full detection engineering lifecycle. Detections can be authored or translated into **KQL, SPL, CQL or QRadar AQL**, with a deterministic validation gate on every query.
+A Model Context Protocol (MCP) server purpose-built for detection engineers. Indexes 15,100+ detection rules from five major detection ecosystems (Sigma, KQL/Sentinel, Splunk ESCU, Elastic, Sublime), enriches them with MITRE ATT&CK v18.1, Atomic Red Team, LOLBAS, LOLFarm (lolol.farm), and 15+ threat intelligence sources — then exposes everything through 134 tools and 16 project-scoped Claude Code skills that implement the full detection engineering lifecycle. Detections can be authored or translated into **KQL, SPL, CQL or QRadar AQL**, with a deterministic validation gate on every query.
 
 The primary output is **kill-chain correlated queries** (KQL + SPL + Sigma), not isolated atomic rules.
 
-![Tools](https://img.shields.io/badge/Tools-132-blue)
+![Tools](https://img.shields.io/badge/Tools-134-blue)
 ![Skills](https://img.shields.io/badge/Skills-15-green)
 ![Detections](https://img.shields.io/badge/Detections-15%2C176-orange)
 ![MITRE](https://img.shields.io/badge/MITRE_ATT%26CK-v18.1-red)
@@ -44,12 +44,12 @@ flowchart TB
     CD -- "stdio<br/><i>default</i>" --> SRV
     WEB -- "HTTP<br/><i>bearer token, sessions</i>" --> SRV
 
-    SRV["<b>Harris HawkEye MCP</b> — 132 tools<br/><br/>HAWKEYE_TRANSPORT &nbsp;·&nbsp; HAWKEYE_READONLY<br/>HAWKEYE_TOOL_PROFILE"]
+    SRV["<b>Harris HawkEye MCP</b> — 134 tools<br/><br/>HAWKEYE_TRANSPORT &nbsp;·&nbsp; HAWKEYE_READONLY<br/>HAWKEYE_TOOL_PROFILE"]
 
     SRV --> LOCAL
     SRV --> NET
 
-    LOCAL["<b>Offline — 73 tools</b><br/><br/>detections 20 &nbsp;·&nbsp; LOLFarm 13<br/>MITRE ATT&amp;CK 11 &nbsp;·&nbsp; knowledge graph 8<br/>Atomic Red Team 7 &nbsp;·&nbsp; coverage engine 6<br/>Sublime 4 &nbsp;·&nbsp; query languages 3 &nbsp;·&nbsp; reports 1"]
+    LOCAL["<b>Offline — 75 tools</b><br/><br/>detections 20 &nbsp;·&nbsp; LOLFarm 13<br/>MITRE ATT&amp;CK 11 &nbsp;·&nbsp; knowledge graph 8<br/>Atomic Red Team 7 &nbsp;·&nbsp; coverage engine 6<br/>Sublime 4 &nbsp;·&nbsp; query languages 3<br/>rule authoring 2 &nbsp;·&nbsp; reports 1"]
 
     NET["<b>Network-bound — 59 tools</b><br/><br/>threat intelligence"]
 
@@ -73,7 +73,7 @@ flowchart TB
     class EXT,CONTENT plain
 ```
 
-The split that matters operationally: **73 of the 132 tools work with no network at all** — every
+The split that matters operationally: **75 of the 134 tools work with no network at all** — every
 detection search, MITRE lookup, LOLFarm query and translation brief reads the local database. The
 59 threat-intelligence tools call external APIs and will fail on an air-gapped or proxied host,
 which is why `phase1-authoring` excludes them.
@@ -186,7 +186,7 @@ Restart Claude Desktop after configuration. On first launch the server indexes t
 | Variable | Description |
 |---|---|
 | `HAWKEYE_READONLY=1` | The database file is never modified — enforced by SQLite, not by convention. Startup indexing and upstream sync are skipped, and the 8 write tools are withheld from the tool list. Refuses to start against an empty database. **Use this for any shared or hosted instance.** |
-| `HAWKEYE_TOOL_PROFILE` | `phase1-authoring` (27 tools), `research` (all reads), `full` (default). An unrecognised name is fatal at startup rather than silently exposing everything |
+| `HAWKEYE_TOOL_PROFILE` | `phase1-authoring` (29 tools), `research` (all reads), `full` (default). An unrecognised name is fatal at startup rather than silently exposing everything |
 | `HAWKEYE_MAX_RESULTS` | Caps rows returned by every list-shaped tool, and caps the caller's own `limit` too. Default 50. Set it to match the context the model is served with — 10 for a 16K window, where one uncapped `list_by_mitre` measured 28% of the whole context. See [GEMMA-RUNBOOK.md](docs/GEMMA-RUNBOOK.md) |
 | `HAWKEYE_SKIP_SYNC=1` | Keeps local indexing but skips the Atomic Red Team and Sublime git pulls. Implied by read-only |
 | `HAWKEYE_TRANSPORT` | `stdio` (default, what Claude Desktop uses) or `http` |
@@ -204,13 +204,13 @@ Restart Claude Desktop after configuration. On first launch the server indexes t
 
 ### Why `HAWKEYE_TOOL_PROFILE` matters
 
-The full surface is 132 tools — a 66 KB `tools/list` payload, on the order of 19,000 tokens. That
+The full surface is 134 tools — a 71 KB `tools/list` payload, on the order of 20,400 tokens. That
 fits comfortably in a large context window, so context is not the constraint — **discrimination is**.
 Eleven `lookup_*` LOLFarm tools, thirteen `otx_*`/`threatfox_*`/`bazaar_*` variants, and four
 plausible answers to "find me rules for credential dumping" degrade tool selection well before the
 window runs out.
 
-`phase1-authoring` is 27 tools and a 14.8 KB payload — a 78% reduction — chosen so that every fact a
+`phase1-authoring` is 29 tools and a 19.6 KB payload — a 73% reduction — chosen so that every fact a
 detection hypothesis rests on is retrievable and nothing else is. It deliberately excludes the
 network-bound threat-intel vendors, every knowledge-graph write, and the report generators.
 

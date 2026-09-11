@@ -29,7 +29,7 @@ vendored skills. A guide whose tool table is 69% wrong trains a model to guess.
 |---|---|---|
 | WAT pipeline | 20.8% | Mostly names absent tools |
 | Security Skills | 19.1% | **No skill system exists** — Open WebUI cannot invoke a `SKILL.md` |
-| Tier 1 tool table | 13.1% | Describes the full 132-tool surface |
+| Tier 1 tool table | 13.1% | Describes the full 134-tool surface |
 | Tier 2 (Playwright) | 7.7% | **No browser tool exists** on any deployment |
 | Quality gates | 7.6% | Prose gates, unenforceable |
 | Utility skills | 4.3% | No skill system |
@@ -39,7 +39,7 @@ absent.
 
 And it omits what matters most here: **`get_query_language_spec` and `translate_detection` are never
 mentioned in CLAUDE.md at all**, along with `list_by_process_name`, `list_by_logsource` and
-`list_by_mitre_tactic`. Five of the 27 tools this deployment exposes — including two thirds of the
+`list_by_mitre_tactic`. Five of the 29 tools this deployment exposes — including two thirds of the
 query-authoring workflow — appear nowhere in the guide.
 
 > CLAUDE.md stays as-is. It is correct for Claude Code, where the skills and the full tool surface
@@ -54,7 +54,7 @@ three channels and two of them are narrower than they look.
 
 | Channel | Reaches Gemma? | Notes |
 |---|---|---|
-| **Tool names, descriptions, JSON schemas** | **Always** | The only guaranteed channel. 27 tools, 15.6 KB, ~4,500 tokens |
+| **Tool names, descriptions, JSON schemas** | **Always** | The only guaranteed channel. 29 tools, 19.6 KB, ~5,600 tokens |
 | **Open WebUI system prompt** | **Yes** | Gemma 4 has native `system` role support, unlike Gemma 3 which folded it into the first user turn |
 | MCP `instructions` (the server's own preamble) | **Do not rely on it** | See below |
 
@@ -147,8 +147,8 @@ recipe recommends `--max-model-len 16384`, and at 16K the arithmetic changes com
 
 | | Tokens | Share of 16K |
 |---|---|---|
-| Tool definitions, 27-tool profile | ~4,600 | **28%** |
-| Tool definitions, full 132 tools | ~19,450 | **does not fit** |
+| Tool definitions, 29-tool profile | ~5,600 | **34%** |
+| Tool definitions, full 134 tools | ~19,450 | **does not fit** |
 | System prompt in §4 | ~700 | 4% |
 
 Those are resident for the whole conversation. Then the responses land on top, and they are larger
@@ -247,13 +247,23 @@ Binaries: call lookup_lolbas before writing any rule scoped to a signed Windows 
 Technique context: get_lolfarm_context(technique_id) for vulnerable drivers, DLL hijacks,
   RMM tools and known false positives. Always pass technique_id.
 
-WRITING A QUERY — this sequence is required
-  1. get_query_language_spec(language)   before writing anything
-  2. write the query, using only field names the spec or brief gave you
-  3. validate_query(query, language)     always, no exceptions
-  4. blocking findings -> fix and validate again. Never present a query that has
+WRITING A RULE — this sequence is required
+  1. build_authoring_brief(technique_id, language)   ALWAYS first. One call gives you
+     the technique, reference rules, telemetry, known false positives, the field
+     vocabulary and the LOLBAS abuse matrix. Do not make those six calls yourself.
+     Pass binary="name.exe" when the rule is scoped to a specific executable.
+  2. If it returns gate=BLOCKED: do not write a query. Report what is missing.
+     If gate=CAVEATS: write it, and state every caveat in your answer.
+  3. Write the query using only names from target.field_vocabulary, covering every
+     pattern in lolbas_gate.matrices, excluding the known false positives.
+  4. validate_query(query, language)     always, no exceptions
+  5. blocking findings -> fix and validate again. Never present a query that has
      blocking findings, and never present a query you did not validate.
-Porting an existing rule: translate_detection first, then steps 2-4.
+Porting an existing rule instead: translate_detection first, then steps 3-5.
+Two or more techniques as one chain: synthesize_killchain(technique_ids, language),
+  then build_authoring_brief per phase to fill in each predicate.
+get_query_language_spec(language) is for depth — operators, cost, worked examples.
+  The brief already carries the vocabulary and the blocking prohibitions.
 
 QRADAR AQL
   Do not write START, STOP, LAST n HOURS or domainId. The hunt backend adds them, and a
@@ -275,13 +285,24 @@ REPORT HONESTLY
 
 ---
 
-## 5. Tool routing — the 27 exposed tools
+## 5. Tool routing — the 29 exposed tools
 
 The reason routing needs help: the profile contains **six ways to retrieve a detection rule** and
 **seven MITRE lookups**. Near-synonymous names are exactly the shape a 3.8B-active router gets
-wrong, and the profile exists to keep that number at 27 rather than 132.
+wrong, and the profile exists to keep that number at 29 rather than 134.
 
-Counts below sum to 27: detection 7, MITRE 7, authoring 4, vulnerability/IOC 4, LOL 2, coverage 3.
+Counts below sum to 29: composite 2, detection 7, MITRE 7, authoring 4, vulnerability/IOC 4, LOL 2,
+coverage 3.
+
+### Composite (2) — start here
+
+| Tool | Replaces | Why |
+|---|---|---|
+| `build_authoring_brief` | six lookups | Everything needed to write one rule, in one call, at **82% fewer tokens** than making those six calls. Carries the LOLBAS abuse matrix as *data*, so the "enumerate every abuse pattern" rule cannot be skipped. Returns `gate: BLOCKED` — and withholds the material — when a rule cannot be safely grounded |
+| `synthesize_killchain` | WAT-42 by hand | Computes the phase order from ATT&CK tactics, the pivot entity, and the correlation idiom for the target language. You fill in the per-phase predicates |
+
+These are the two highest-leverage tools in the profile. A model that reaches for
+`build_authoring_brief` first makes one call where it used to make six, and cannot forget the gate.
 
 ### Detection corpus (7) — disambiguated by what you have, not what you want
 
@@ -340,12 +361,21 @@ them cheap to over-call. They frame a problem; they do not answer a specific one
 ## 6. Workflows
 
 CLAUDE.md's WAT pipeline is 13 stages. That is a reasonable structure for Claude Code and too many
-branches for this model. These four cover the same ground.
+branches for this model. These five cover the same ground.
 
 **Author a rule for a technique**
-`lookup_mitre_technique` + `list_by_mitre` + `get_data_sources` + `get_lolfarm_context` in parallel →
-`lookup_lolbas` for any binary named → `get_query_language_spec` → write → `validate_query` → fix →
-present with the unconfirmed fields named.
+`build_authoring_brief(technique_id, language)` → write → `validate_query` → fix → present with the
+unconfirmed fields named.
+
+That is one lookup, not six. The brief carries the technique, the reference rules, the telemetry, the
+false positives, the field vocabulary and the LOLBAS matrix in ~1,500 tokens — the six calls it
+replaces measured ~8,200. If it returns `gate: BLOCKED`, report the gap; do not write the rule
+anyway.
+
+**Correlate several techniques into a kill chain**
+`synthesize_killchain(technique_ids, language)` → `build_authoring_brief` per phase for the
+predicates → fill the scaffold → `validate_query` → present with the correlation window stated.
+For AQL you get one query per phase plus a written spec, because Ariel cannot join.
 
 **Port an existing rule to another language**
 `search_detections` or `list_by_mitre` to find it → `translate_detection(detection_id, target)` →
@@ -364,24 +394,34 @@ existing coverage → author if there is a gap.
 
 ## 7. What this cannot enforce, and what would
 
-Be clear-eyed about the system prompt: **it converts hard requirements into strong suggestions.** A
-3.8B-active router will skip a prose instruction some fraction of the time, and neither this file nor
-CLAUDE.md can change that. Two things in §4 are load-bearing and unenforced:
+A system prompt **converts hard requirements into strong suggestions**. A 3.8B-active router will
+skip a prose instruction some fraction of the time, and no amount of rewriting fixes that. So the two
+requirements that actually matter were moved out of the prompt and into code.
 
-- **The LOLBAS gate.** "Enumerate every abuse pattern before writing a condition" is a sentence. If
-  the model skips it, nothing notices.
+**The LOLBAS gate is now enforced.** "Enumerate every abuse pattern before writing a condition" used
+to be a sentence; it is now the payload of `build_authoring_brief`. The abuse matrix arrives whether
+the model asked for it or not, so it cannot be forgotten — and when a binary has no matrix, the brief
+returns `gate: BLOCKED` **and withholds the authoring material**, because a BLOCKED flag sitting next
+to a usable payload is just another suggestion. Measured: a blocked brief is 842 bytes against 6,109
+for a usable one.
+
+**Kill-chain structure is now computed.** `synthesize_killchain` derives the phase order from ATT&CK
+tactics rather than from the order the caller listed them, picks the pivot, and emits the right
+correlation idiom per language. For AQL it refuses to emit a joined query at all, because Ariel has
+no JOIN and this server's own `validate_query` would reject one.
+
+What remains genuinely unenforced:
+
 - **The validate-before-present rule.** `validate_query` is deterministic and reliable — but only
-  once it is *called*. Nothing forces the call.
+  once it is *called*, and nothing forces the call. The brief's `next_step` asks for it; that is
+  still a request.
+- **Whether the model uses the composite tools at all.** Nothing stops it making the six separate
+  calls and skipping the gate that way. The routing rules in §4 and §5 point at the composites, but
+  they are prompt-level, not structural.
 
-The fix is not a better prompt. It is to collapse each gate into a single deterministic server-side
-tool, so the gate is a return value rather than an instruction — `build_authoring_brief` returning
-`gate: BLOCKED` when a binary-scoped abuse matrix is incomplete, and a `synthesize_killchain`
-scaffold. That is Phase 4 of
-[OPENWEBUI-GEMMA-INTEGRATION-PLAN.md](OPENWEBUI-GEMMA-INTEGRATION-PLAN.md), and it is not built:
-`src/tools/authoring/` does not exist. Until it does, treat the prompt as mitigation, not control.
-
-Also unmeasured: **generation quality against the real model.** Nothing in this repository has been
-evaluated end to end on Gemma 4. The tools are tested; what Gemma does with them is not.
+Also still unmeasured: **generation quality against the real model.** Nothing here has been evaluated
+end to end on Gemma 4. The tools are tested — 62 checks on the composites alone — but what Gemma does
+with them is not.
 
 ---
 

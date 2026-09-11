@@ -48,16 +48,28 @@ if (!existsSync(SOURCE_DB)) {
 }
 copyFileSync(SOURCE_DB, TEST_DB);
 
-// The expected profile size is read from the profile definition rather than
-// written here as a literal. A hardcoded 25 in this file went stale the moment
-// two tools were added to phase1-authoring, and a test that fails because the
-// test is out of date teaches people to edit the number instead of reading it.
-// What is actually under test is that the server exposes exactly what the
-// profile declares — so assert against the declaration.
-const { PROFILES } = await import(
+// Every count in this suite is derived, never written down. Literals here went
+// stale three separate times — once per batch of tools added — and a test that
+// fails because the test is out of date trains people to edit the number rather
+// than read the assertion. What is under test is the *relationship*: the profile
+// exposes exactly what it declares, read-only exposes everything except the
+// writes, and writable exposes everything.
+const { WRITE_TOOLS, PROFILES } = await import(
   pathToFileURL(path.join(REPO, 'dist', 'tools', 'profiles.js')).href
 );
 const PHASE1_SIZE = PROFILES['phase1-authoring'].include.length;
+
+const { toolRegistry, registerAllTools } = await import(
+  pathToFileURL(path.join(REPO, 'dist', 'tools', 'index.js')).href
+);
+{
+  const realErr = console.error;
+  console.error = () => {};
+  registerAllTools();
+  console.error = realErr;
+}
+const FULL_SIZE = toolRegistry.count();
+const READONLY_SIZE = FULL_SIZE - WRITE_TOOLS.length;
 
 process.on('exit', () => {
   try { rmSync(SCRATCH, { recursive: true, force: true }); } catch { /* best effort */ }
@@ -169,7 +181,8 @@ const textOf = (result) => JSON.stringify(result ?? {});
 console.log('\n=== 1. Read-only with no profile withholds only the 8 write tools ===');
 {
   // Read-only subtracts WRITE_TOOLS from whatever profile is active, so the
-  // surface here is 129 - 8 = 121. Those eight cannot function in read-only, and
+  // surface here is FULL_SIZE minus the writes. Those cannot function in
+  // read-only, and
   // several bulk-write then saveDb(), which would apply in memory and silently
   // never persist. Withholding beats a write that reports success and evaporates.
   //
@@ -181,8 +194,10 @@ console.log('\n=== 1. Read-only with no profile withholds only the 8 write tools
     const instr = init.result?.instructions ?? '';
     const tools = await c.list();
     const names = tools.map(t => t.name);
-    check('tools/list returns 124 (132 minus 8 writes)', names.length === 124, `got ${names.length}`);
-    check('instructions advertise 124 tools', instr.includes('exposing 124 tools'), instr.slice(0, 110));
+    check(`tools/list returns ${READONLY_SIZE} (${FULL_SIZE} minus ${WRITE_TOOLS.length} writes)`,
+      names.length === READONLY_SIZE, `got ${names.length}`);
+    check(`instructions advertise ${READONLY_SIZE} tools`,
+      instr.includes(`exposing ${READONLY_SIZE} tools`), instr.slice(0, 110));
     check('knowledge write withheld', !names.includes('create_entity'));
     check('knowledge read kept', names.includes('search_entities'));
     check('sync withheld', !names.includes('sync_lolfarm'));
@@ -339,7 +354,8 @@ console.log('\n=== 4. research profile excludes writes, keeps reads ===');
   try {
     await c.handshake();
     const names = (await c.list()).map(t => t.name);
-    check('exposes 124 tools (132 minus 8 writes)', names.length === 124, `got ${names.length}`);
+    check(`exposes ${READONLY_SIZE} tools (${FULL_SIZE} minus ${WRITE_TOOLS.length} writes)`,
+      names.length === READONLY_SIZE, `got ${names.length}`);
     check('write tool excluded', !names.includes('create_entity'));
     check('read counterpart kept', names.includes('search_entities'));
     check('sync excluded', !names.includes('sync_lolfarm'));
@@ -463,7 +479,7 @@ console.log('\n=== 7. Default writable mode with HAWKEYE_SKIP_SYNC ===');
   try {
     const init = await c.handshake();
     const tools = await c.list();
-    check('writable mode exposes all 132 tools', tools.length === 132, `got ${tools.length}`);
+    check(`writable mode exposes all ${FULL_SIZE} tools`, tools.length === FULL_SIZE, `got ${tools.length}`);
     check('no scoped notice in writable default', !(init.result?.instructions ?? '').includes('scoped tool profile'));
     const w = await c.call(3, 'create_entity', {
       name: 'skip-sync-probe', entity_type: 'test', observations: ['writable'],
