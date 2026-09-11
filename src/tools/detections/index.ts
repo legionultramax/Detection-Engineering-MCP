@@ -2,6 +2,7 @@
 import { defineTool, ToolDefinition } from '../registry.js';
 import { runQuery } from '../../db/connection.js';
 import { ftsStatus, buildMatchExpression, bm25Weights, FTS_TABLE } from '../../db/fts.js';
+import { resolveLimit } from '../../config/limits.js';
 import { cveToDetectionTool, handleCVEToDetection } from './cve-detection.js';
 import { handleYARAToSigma } from './yara-to-sigma.js';
 import { handleSigmaToKQL } from './sigma-to-kql.js';
@@ -170,9 +171,10 @@ const searchDetections = defineTool({
     required: ['query'],
   },
   handler: async (args) => {
-    const { query, source, severity, limit = 20 } = args as {
+    const { query, source, severity, limit: rawLimit } = args as {
       query: string; source?: string; severity?: string; limit?: number
     };
+    const limit = resolveLimit(rawLimit, 20);
 
     const raw = String(query ?? '').trim();
     if (!raw) return { error: true, message: 'No search terms provided.' };
@@ -334,7 +336,8 @@ const listByMitre = defineTool({
     required: ['technique_id'],
   },
   handler: async (args) => {
-    const { technique_id, limit = 50 } = args as { technique_id: string; limit?: number };
+    const { technique_id, limit: rawLimit } = args as { technique_id: string; limit?: number };
+    const limit = resolveLimit(rawLimit, 50);
 
     const results = runQuery<Detection>(
       `SELECT id, name, source_type, severity, mitre_techniques,
@@ -379,7 +382,8 @@ const listBySeverity = defineTool({
     required: ['severity'],
   },
   handler: async (args) => {
-    const { severity, source, limit = 50 } = args as { severity: string; source?: string; limit?: number };
+    const { severity, source, limit: rawLimit } = args as { severity: string; source?: string; limit?: number };
+    const limit = resolveLimit(rawLimit, 50);
     
     let sql = 'SELECT id, name, source_type, severity, mitre_techniques FROM detections WHERE severity = ?';
     const params: unknown[] = [severity];
@@ -897,7 +901,8 @@ const listByProcessName = defineTool({
     required: ['process'],
   },
   handler: async (args) => {
-    const { process: procName, limit = 50 } = args as { process: string; limit?: number };
+    const { process: procName, limit: rawLimit } = args as { process: string; limit?: number };
+    const limit = resolveLimit(rawLimit, 50);
     const results = runQuery<Detection>(
       `SELECT id, name, source_type, severity, mitre_techniques, process_names
        FROM detections WHERE process_names LIKE ? ORDER BY severity DESC, name LIMIT ?`,
@@ -930,7 +935,8 @@ const listByCve = defineTool({
     required: ['cve_id'],
   },
   handler: async (args) => {
-    const { cve_id, limit = 50 } = args as { cve_id: string; limit?: number };
+    const { cve_id, limit: rawLimit } = args as { cve_id: string; limit?: number };
+    const limit = resolveLimit(rawLimit, 50);
     const results = runQuery<Detection>(
       `SELECT id, name, source_type, severity, mitre_techniques, cves
        FROM detections WHERE cves LIKE ? ORDER BY severity DESC, name LIMIT ?`,
@@ -964,9 +970,10 @@ const listByLogsource = defineTool({
     },
   },
   handler: async (args) => {
-    const { product, category, service, limit = 50 } = args as {
+    const { product, category, service, limit: rawLimit } = args as {
       product?: string; category?: string; service?: string; limit?: number
     };
+    const limit = resolveLimit(rawLimit, 50);
 
     if (!product && !category && !service) {
       return { error: 'Provide at least one of: product, category, or service' };
@@ -1014,7 +1021,8 @@ const listByDataSource = defineTool({
     required: ['data_source'],
   },
   handler: async (args) => {
-    const { data_source, limit = 50 } = args as { data_source: string; limit?: number };
+    const { data_source, limit: rawLimit } = args as { data_source: string; limit?: number };
+    const limit = resolveLimit(rawLimit, 50);
     const results = runQuery<Detection>(
       `SELECT id, name, source_type, severity, mitre_techniques, data_sources
        FROM detections WHERE data_sources LIKE ? ORDER BY severity DESC, name LIMIT ?`,
@@ -1048,7 +1056,8 @@ const listByMitreTactic = defineTool({
     required: ['tactic'],
   },
   handler: async (args) => {
-    const { tactic, source, limit = 50 } = args as { tactic: string; source?: string; limit?: number };
+    const { tactic, source, limit: rawLimit } = args as { tactic: string; source?: string; limit?: number };
+    const limit = resolveLimit(rawLimit, 50);
 
     let sql = `SELECT id, name, source_type, severity, mitre_techniques, mitre_tactics
                FROM detections WHERE mitre_tactics LIKE ?`;

@@ -1,5 +1,7 @@
 // Tool Registration System - Plugin-style architecture for MCP tools
 
+import { sanitizeToolArgs } from './sanitize.js';
+
 export interface ToolDefinition {
   name: string;
   description: string;
@@ -93,7 +95,9 @@ class ToolRegistry {
         `Available: ${this.getActiveNames().join(', ')}`
       );
     }
-    return tool.handler(args);
+    // Repair arguments that arrived carrying the model's own tool-call syntax.
+    // A no-op for every well-behaved client; see sanitize.ts for why it exists.
+    return tool.handler(sanitizeToolArgs(name, args));
   }
 
   async executeForMcp(name: string, args: Record<string, unknown>): Promise<ToolResult> {

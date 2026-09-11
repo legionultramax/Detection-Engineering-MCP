@@ -29,6 +29,7 @@
     "verify:http": "npm run build && node tests/verify-http-transport.mjs",
     "verify:coverage": "npm run build && node tests/verify-translation-coverage.mjs",
     "verify:aql": "npm run build && node tests/verify-aql-bridge.mjs",
+    "verify:gemma": "npm run build && node tests/verify-gemma-compat.mjs",
     "fts:build": "npm run build && node scripts/build-fts.mjs",
     "fts:status": "npm run build && node scripts/build-fts.mjs --status",
     "catalog:build": "npm run build && node scripts/build-field-catalog.mjs",

@@ -187,6 +187,7 @@ Restart Claude Desktop after configuration. On first launch the server indexes t
 |---|---|
 | `HAWKEYE_READONLY=1` | The database file is never modified — enforced by SQLite, not by convention. Startup indexing and upstream sync are skipped, and the 8 write tools are withheld from the tool list. Refuses to start against an empty database. **Use this for any shared or hosted instance.** |
 | `HAWKEYE_TOOL_PROFILE` | `phase1-authoring` (27 tools), `research` (all reads), `full` (default). An unrecognised name is fatal at startup rather than silently exposing everything |
+| `HAWKEYE_MAX_RESULTS` | Caps rows returned by every list-shaped tool, and caps the caller's own `limit` too. Default 50. Set it to match the context the model is served with — 10 for a 16K window, where one uncapped `list_by_mitre` measured 28% of the whole context. See [GEMMA-RUNBOOK.md](docs/GEMMA-RUNBOOK.md) |
 | `HAWKEYE_SKIP_SYNC=1` | Keeps local indexing but skips the Atomic Red Team and Sublime git pulls. Implied by read-only |
 | `HAWKEYE_TRANSPORT` | `stdio` (default, what Claude Desktop uses) or `http` |
 | `HAWKEYE_HTTP_HOST` | Bind address for HTTP, default `127.0.0.1` |
@@ -227,6 +228,7 @@ npm run verify:search   # 36 checks — FTS5, ranking, injection safety
 npm run verify:queries  # 95 checks — language specs and the validation gate
 npm run verify:coverage # 16 checks — translation brief coverage
 npm run verify:aql      # 74 checks — QRadar AQL spec, validation, pipeline constraints
+npm run verify:gemma    # 32 checks — small-model schema shape, context budget, delimiter repair
 npm run verify:http     # 26 checks — the HTTP transport, on an ephemeral port
 npm test                # 138 checks (needs a writable database)
 ```

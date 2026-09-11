@@ -88,6 +88,7 @@ translation layer between you and the protocol.
 export DETECTIONS_DB_PATH=/abs/path/detections.db
 export HAWKEYE_READONLY=1
 export HAWKEYE_TOOL_PROFILE=phase1-authoring
+export HAWKEYE_MAX_RESULTS=10          # see the context budget below — not optional at 16K
 export HAWKEYE_TRANSPORT=http
 export HAWKEYE_HTTP_TOKEN="$(openssl rand -hex 32)"
 # Bind stays on 127.0.0.1 by default. If Open WebUI is on another host, prefer an
@@ -101,34 +102,111 @@ with the bearer token. `/health` answers unauthenticated for liveness.
 
 ### vLLM
 
-Gemma 4 has native function calling, but vLLM still needs it switched on:
+Gemma 4 has native function calling, but vLLM needs it switched on, and Gemma's format is not JSON —
+it is a custom serialisation, `<|tool_call>call:name{key:<|"|>value<|"|>}<tool_call|>`, which is why
+a dedicated parser is required:
 
 ```bash
 vllm serve nvidia/Gemma-4-26B-A4B-NVFP4 \
+  --max-model-len 32768 \
   --enable-auto-tool-choice \
-  --tool-call-parser <parser matching the Gemma 4 template>
+  --tool-call-parser gemma4 \
+  --reasoning-parser gemma4 \
+  --chat-template examples/tool_chat_template_gemma4.jinja
 ```
 
-**Confirm the parser value against your vLLM version rather than copying one.** The parser has to
-match the model's chat template, and a mismatch does not error — it silently produces assistant text
-that looks like a tool call and is never dispatched. Smoke-test it before anything else:
+A parser mismatch does not error. It silently produces assistant text that looks like a tool call and
+is never dispatched. Smoke-test before anything else:
 
 > "Call get_stats and tell me how many detections are indexed."
 
-If the answer contains a real number, tool calling works end to end. If the model *describes*
-calling the tool, the parser is wrong.
+A real number means tool calling works end to end. If the model *describes* calling the tool, the
+parser or the chat template is wrong.
 
-### Context budget
+> **Known upstream bug, and this server defends against it.** vLLM's `gemma4` parser has been
+> reported leaking its own string delimiters into parsed argument values — `<|"|>certutil<|"|>`
+> arriving where `certutil` was meant ([vllm#39468](https://github.com/vllm-project/vllm/issues/39468),
+> open; [vllm#44522](https://github.com/vllm-project/vllm/issues/44522)). The failure is silent and
+> ugly: a search term wrapped in delimiters matches nothing, and "no detections found" reads as
+> coverage information rather than as a broken argument.
+>
+> The registry now strips those delimiters from incoming arguments and **logs once** with a link to
+> the issue, so a repaired call still tells you the parser needs attention. Verified end to end: a
+> leaked search term, technique ID and query each return results identical to the clean form, while
+> ordinary `<`, `>` and `|` characters in a real query are untouched. Do not treat this as a reason
+> to skip the smoke test — it repairs arguments, it does not fix your parser.
 
-| | Tokens |
+**Parallel tool calls: keep them to three.** Gemma 4 can emit several in one turn but reliability
+falls off past about three, so the CLAUDE.md habit of firing six lookups at once does not transfer.
+The workflows in §6 are written in small parallel batches for that reason.
+
+### Context budget — read this before choosing `--max-model-len`
+
+The model's ceiling is 262,144 tokens. **That is not what you get by default.** vLLM's own Gemma 4
+recipe recommends `--max-model-len 16384`, and at 16K the arithmetic changes completely:
+
+| | Tokens | Share of 16K |
+|---|---|---|
+| Tool definitions, 27-tool profile | ~4,600 | **28%** |
+| Tool definitions, full 132 tools | ~19,450 | **does not fit** |
+| System prompt in §4 | ~700 | 4% |
+
+Those are resident for the whole conversation. Then the responses land on top, and they are larger
+than the definitions:
+
+| Call | Tokens | Share of 16K |
+|---|---|---|
+| `list_by_mitre("T1059.001")` at the old default of 50 rows | 4,535 | **28%** |
+| `get_query_language_spec("aql")` | 4,054 | 25% |
+| `get_mitigations("T1059.001")` before trimming | 3,404 | 21% |
+| `get_groups_using_technique("T1059.001")` uncapped | 2,488 | 15% |
+
+Measured end to end, a perfectly ordinary six-call authoring session —
+`lookup_mitre_technique` → `list_by_mitre` → `get_data_sources` → `get_lolfarm_context` →
+`lookup_lolbas` → `get_query_language_spec` — consumed **14,873 of 16,384 tokens, 91% of the window,
+before the model wrote a single token of output.**
+
+**Two changes fix this, and you need both.**
+
+```bash
+export HAWKEYE_MAX_RESULTS=10      # caps every list-shaped tool, and the caller too
+```
+
+and serve with more room:
+
+```bash
+--max-model-len 32768              # 65536 if memory allows
+```
+
+The same session then measures **11,268 tokens: 69% of 16K, 34% of 32K.** `get_mitigations` now
+trims prose by default (3,404 → 826 tokens) and `get_groups_using_technique` is capped, both
+reported rather than silent.
+
+`HAWKEYE_MAX_RESULTS` bounds the caller as well as the default — a model asking for 200 rows is
+exactly the case a per-tool default cannot catch. An explicit *smaller* limit is still honoured.
+
+| `--max-model-len` | Set `HAWKEYE_MAX_RESULTS` to |
 |---|---|
-| Gemma 4 26B-A4B context | 262,144 |
-| Tool definitions (27 tools) | ~4,500 |
-| System prompt below | ~700 |
+| 8192 | 5 — though the tool definitions alone are 55% of it; prefer raising the window |
+| 16384 | 10 |
+| 32768 | 15 |
+| 131072+ | leave unset (default 50) |
 
-Context is not the constraint. **Discrimination is** — 25.2B total parameters but only **3.8B active
-per token**, so routing across near-identical tool names is where this model degrades, long before
-the window fills. That is what the `phase1-authoring` profile and the routing rules in §5 exist for.
+Even with context solved, **discrimination remains the real limit** — 25.2B total parameters but only
+**3.8B active per token**, so routing across near-identical tool names degrades long before the
+window fills. That is what the profile and the routing rules in §5 are for.
+
+### Schema compatibility — clean, and verified
+
+Gemma 4 degrades on deeply nested schemas and complex enums; the guidance is one to two levels of
+nesting. Every tool in the `phase1-authoring` profile is inside that, checked by
+`npm run verify:gemma`: no nesting beyond a flat property bag, no `anyOf`/`oneOf`/`allOf`/`$ref`,
+no object-typed arguments, at most 5 arguments on any tool, 2 of 27 using a simple enum.
+
+Two tools on the **full** surface would not be: `generate_hunt_report` takes an array of nested
+objects, and `create_entity` takes a free-form object. Both are excluded from `phase1-authoring`, so
+neither reaches this deployment — but both are reasons not to point Gemma at the `research` or
+`full` profile.
 
 ---
 
@@ -320,14 +398,21 @@ Run these in order. Each has a wrong answer that tells you which layer is broken
 | 5 | "Write a KQL rule for T1003.001." | The authoring loop | Skipped `validate_query` → the sequence is not being followed |
 | 6 | "Write a QRadar AQL query for encoded PowerShell." | AQL constraints | Contains `LAST 24 HOURS` → the AQL block is not reaching the model |
 | 7 | "Look up CVE-2021-44228." | Network-bound tools | Errors → expected on an isolated host; the model must *say* the check did not run |
+| 8 | Watch the server's stderr during 3–5 | The tool parser | A `Stripped Gemma 4 tool-call delimiters` line → your vLLM parser is leaking (vllm#39468). Calls still work; fix the parser |
 
-Server-side, all seven suites should pass first:
+Server-side, all eight suites should pass first:
 
 ```bash
 npm run lint && npm run tools:check
 npm run verify:readonly && npm run verify:queries && npm run verify:aql
 npm run verify:search && npm run verify:http && npm run verify:coverage
+npm run verify:gemma      # 32 checks — schema shape, context budget, delimiter repair
 ```
+
+`verify:gemma` is the one that keeps this document true. It asserts that the profile's schemas stay
+inside Gemma's nesting ceiling, that the scoped payload still fits a third of a 16K window, that
+`HAWKEYE_MAX_RESULTS` binds the caller and not just the default, and that a leaked-delimiter argument
+resolves identically to a clean one.
 
 ---
 
@@ -336,9 +421,21 @@ npm run verify:search && npm run verify:http && npm run verify:coverage
 - [Gemma 4 model card](https://ai.google.dev/gemma/docs/core/model_card_4) — 25.2B total / 3.8B
   active, 256K context, native `system` role, native structured tool use
 - [google/gemma-4-26B-A4B-it](https://huggingface.co/google/gemma-4-26B-A4B-it)
+- [Function calling with Gemma 4](https://ai.google.dev/gemma/docs/capabilities/text/function-calling-gemma4)
+  — the `<|tool_call>call:name{key:<|"|>value<|"|>}<tool_call|>` serialisation, and tool declaration
+  via `apply_chat_template(tools=…)`
+- [vLLM Gemma 4 recipe](https://docs.vllm.ai/projects/recipes/en/stable/Google/Gemma4.html) —
+  `--tool-call-parser gemma4`, `--reasoning-parser gemma4`, `--chat-template
+  tool_chat_template_gemma4.jinja`, and the `--max-model-len 16384` recommendation that drives the
+  context budget in §3
+- [vllm#39468](https://github.com/vllm-project/vllm/issues/39468) (open) and
+  [vllm#44522](https://github.com/vllm-project/vllm/issues/44522) — the `gemma4` parser leaking
+  `<|"|>` delimiters into argument values
 - [Open WebUI — MCP support](https://docs.openwebui.com/features/extensibility/mcp/) — native MCP
   from v0.6.31, Streamable HTTP only
 - [mcpo issue #142](https://github.com/open-webui/mcpo/issues/142) — MCP `instructions` not passed
   through to the model
-- Tool counts, section weights and the 72/22/50 split were measured against this repository at
-  commit `f486d2c`, not estimated.
+
+Every number in this document was measured against this repository rather than estimated: the
+72/22/50 tool split, the section weights in §1, the payload and response sizes in §3, and the 91% →
+69% session figures. `npm run verify:gemma` re-checks the ones that can drift.

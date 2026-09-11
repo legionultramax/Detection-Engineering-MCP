@@ -349,6 +349,76 @@ console.log('\n=== 4. research profile excludes writes, keeps reads ===');
   } finally { c.kill(); }
 }
 
+console.log('\n=== 4b. HAWKEYE_MAX_RESULTS bounds response size ===');
+{
+  // The third deployment knob, alongside read-only and the tool profile. It
+  // exists because response size is a property of the deployment: the same
+  // list_by_mitre call that is a convenience in a 200K window measured ~4,500
+  // tokens, 28% of the 16K context vLLM's own Gemma 4 recipe recommends.
+  const textOfCall = async (c, id, name, args) => {
+    const r = await c.call(id, name, args);
+    return r?.content?.[0]?.text ?? '';
+  };
+
+  const big = new Client({ DETECTIONS_DB_PATH: TEST_DB, HAWKEYE_READONLY: '1' });
+  const small = new Client({
+    DETECTIONS_DB_PATH: TEST_DB, HAWKEYE_READONLY: '1', HAWKEYE_MAX_RESULTS: '5',
+  });
+  try {
+    await big.handshake();
+    await small.handshake();
+
+    const wide = await textOfCall(big, 20, 'list_by_mitre', { technique_id: 'T1059.001' });
+    const tight = await textOfCall(small, 20, 'list_by_mitre', { technique_id: 'T1059.001' });
+    check('an unset budget keeps the historical default', wide.length > 8000, `${wide.length} B`);
+    check('a set budget shrinks the response', tight.length < wide.length / 2,
+      `${tight.length} B vs ${wide.length} B`);
+
+    // The budget has to beat the caller, not just the default — a model asking
+    // for 200 rows is the case a per-tool default cannot catch.
+    const overreach = await textOfCall(small, 21, 'list_by_mitre',
+      { technique_id: 'T1059.001', limit: 200 });
+    check('an explicit oversized limit is capped too',
+      overreach.length <= tight.length * 1.1, `${overreach.length} B vs ${tight.length} B`);
+
+    // Under the cap the caller still wins, or the knob would be a straitjacket.
+    const under = await textOfCall(small, 22, 'list_by_mitre',
+      { technique_id: 'T1059.001', limit: 2 });
+    check('a smaller explicit limit is still honoured', under.length < tight.length,
+      `${under.length} B vs ${tight.length} B`);
+
+    const groups = await textOfCall(small, 23, 'get_groups_using_technique',
+      { technique_id: 'T1059.001' });
+    check('get_groups_using_technique is bounded and says so',
+      /"truncated"/.test(groups) && groups.length < 2000, `${groups.length} B`);
+
+    const mit = await textOfCall(big, 24, 'get_mitigations', { technique_id: 'T1059.001' });
+    check('get_mitigations trims prose by default', /description_truncated/.test(mit),
+      mit.slice(0, 120));
+    const mitFull = await textOfCall(big, 25, 'get_mitigations',
+      { technique_id: 'T1059.001', full_descriptions: true });
+    check('...and full_descriptions returns the untrimmed text', mitFull.length > mit.length,
+      `${mitFull.length} B vs ${mit.length} B`);
+  } catch (e) {
+    check('session 4b completed', false, e.message + ' | stderr: ' + small.err.slice(-400));
+  } finally { big.kill(); small.kill(); }
+
+  // A bad value must not silently become NaN, which would let Math.min pass
+  // every request straight through and disable the budget without saying so.
+  const bad = new Client({
+    DETECTIONS_DB_PATH: TEST_DB, HAWKEYE_READONLY: '1', HAWKEYE_MAX_RESULTS: 'lots',
+  });
+  try {
+    await bad.handshake();
+    const r = await bad.call(26, 'list_by_mitre', { technique_id: 'T1059.001' });
+    check('an unparseable budget falls back rather than disabling the cap',
+      (r?.content?.[0]?.text ?? '').length > 0);
+    check('...and says so on stderr', /HAWKEYE_MAX_RESULTS/.test(bad.err), bad.err.slice(-160));
+  } catch (e) {
+    check('session 4b-bad completed', false, e.message);
+  } finally { bad.kill(); }
+}
+
 console.log('\n=== 5. Unknown profile name is fatal ===');
 {
   const { exitCode, stderr } = await expectExit({

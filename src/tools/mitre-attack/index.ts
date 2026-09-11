@@ -2,6 +2,10 @@
 // Query threat groups, software, campaigns, mitigations, data sources
 import { defineTool, ToolDefinition } from '../registry.js';
 import { runQuery } from '../../db/connection.js';
+import { resolveLimit } from '../../config/limits.js';
+
+/** Characters of mitigation prose kept before trimming. See get_mitigations. */
+const MITIGATION_DESC_CHARS = 400;
 import {
   getGroupByName,
   getGroupTechniques,
@@ -155,16 +159,26 @@ const searchMalwareTools = defineTool({
 // Get mitigations for a technique
 const getMitigations = defineTool({
   name: 'get_mitigations',
-  description: 'Get MITRE ATT&CK mitigations for a specific technique. Answers "How do I mitigate T1059?"',
+  description:
+    'Get MITRE ATT&CK mitigations for a specific technique. Answers "How do I mitigate T1059?" ' +
+    'Descriptions are trimmed to the actionable opening; the url returns the full text.',
   inputSchema: {
     type: 'object',
     properties: {
       technique_id: { type: 'string', description: 'MITRE technique ID (e.g., "T1059", "T1059.001")' },
+      full_descriptions: {
+        type: 'boolean',
+        description:
+          'Return untrimmed mitigation descriptions (default: false). The full text runs to ' +
+          'several thousand tokens for a common technique.',
+      },
     },
     required: ['technique_id'],
   },
   handler: async (args) => {
-    const { technique_id } = args as { technique_id: string };
+    const { technique_id, full_descriptions } = args as {
+      technique_id: string; full_descriptions?: boolean;
+    };
     const mitigations = getMitigationsForTechnique(technique_id) as Array<Record<string, unknown>>;
     
     if (mitigations.length === 0) {
@@ -175,15 +189,29 @@ const getMitigations = defineTool({
       };
     }
     
+    // MITRE mitigation prose measured 3,404 tokens for T1059.001 — the third
+    // largest response in the phase1-authoring profile, and about a fifth of a
+    // 16K context for one call. The opening sentences carry the instruction;
+    // the remainder is elaboration that the url already serves.
+    const trimmed = mitigations.map(m => {
+      const desc = String(m.description ?? '');
+      const short = !full_descriptions && desc.length > MITIGATION_DESC_CHARS;
+      return {
+        id: m.external_id,
+        name: m.name,
+        description: short ? desc.slice(0, MITIGATION_DESC_CHARS).trimEnd() + '…' : desc,
+        ...(short ? { description_truncated: true } : {}),
+        url: m.url,
+      };
+    });
+
     return {
       technique_id,
       count: mitigations.length,
-      mitigations: mitigations.map(m => ({
-        id: m.external_id,
-        name: m.name,
-        description: m.description,
-        url: m.url,
-      })),
+      mitigations: trimmed,
+      ...(trimmed.some(m => m.description_truncated)
+        ? { note: 'Descriptions trimmed. Pass full_descriptions=true, or follow url, for the complete text.' }
+        : {}),
     };
   },
 });
@@ -318,17 +346,22 @@ const listCampaigns = defineTool({
 // Get groups that use a specific technique
 const getGroupsUsingTechnique = defineTool({
   name: 'get_groups_using_technique',
-  description: 'Find all threat groups that use a specific MITRE technique.',
+  description:
+    'Find threat groups that use a specific MITRE technique. A widely-used technique is ' +
+    'attributed to well over a hundred groups, so results are capped — raise limit if you need ' +
+    'the full list.',
   inputSchema: {
     type: 'object',
     properties: {
       technique_id: { type: 'string', description: 'MITRE technique ID (e.g., "T1059", "T1059.001")' },
+      limit: { type: 'number', description: 'Maximum groups to return (default: 50)' },
     },
     required: ['technique_id'],
   },
   handler: async (args) => {
-    const { technique_id } = args as { technique_id: string };
-    
+    const { technique_id, limit: rawLimit } = args as { technique_id: string; limit?: number };
+    const limit = resolveLimit(rawLimit, 50);
+
     const groups = runQuery<Record<string, unknown>>(
       `SELECT g.* FROM mitre_groups g
        JOIN mitre_relationships r ON r.source_ref = g.stix_id
@@ -338,10 +371,15 @@ const getGroupsUsingTechnique = defineTool({
       [technique_id.toUpperCase()]
     );
     
+    const shown = groups.slice(0, limit);
     return {
       technique_id,
       count: groups.length,
-      groups: groups.map(g => ({
+      returned: shown.length,
+      ...(groups.length > shown.length
+        ? { truncated: `${groups.length - shown.length} more — raise limit to see them` }
+        : {}),
+      groups: shown.map(g => ({
         id: g.external_id,
         name: g.name,
         aliases: g.aliases ? JSON.parse(g.aliases as string) : [],
