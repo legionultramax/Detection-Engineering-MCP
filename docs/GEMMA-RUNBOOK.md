@@ -192,9 +192,19 @@ exactly the case a per-tool default cannot catch. An explicit *smaller* limit is
 | 32768 | 15 |
 | 131072+ | leave unset (default 50) |
 
-Even with context solved, **discrimination remains the real limit** — 25.2B total parameters but only
-**3.8B active per token**, so routing across near-identical tool names degrades long before the
-window fills. That is what the profile and the routing rules in §5 are for.
+Context is the constraint this runbook can actually measure, and the profile exists to fit it. The
+routing rules in §5 are a separate, weaker claim: fewer near-duplicate tool names is plausibly easier
+to route across, but nothing here tested that, so treat §5 as a convenience rather than a
+requirement.
+
+> **A correction, since an earlier draft of this file got it wrong.** It repeatedly justified the
+> profile and the short system prompt by calling Gemma 4 26B-A4B a "3.8B-active router" — reasoning
+> from its active parameter count as though it behaved like a 4B dense model. Active parameters
+> govern inference speed, not judgement. This is a **25.2B-parameter model**, considerably more
+> capable than that framing implied, and nothing in this repository has been evaluated against it.
+> The profile is justified above on arithmetic: 20,400 tokens of tool definitions do not fit in a
+> 16,384-token window. That argument does not depend on the model being weak, and it is the one to
+> rely on.
 
 ### Schema compatibility — clean, and verified
 
@@ -212,8 +222,10 @@ neither reaches this deployment — but both are reasons not to point Gemma at t
 
 ## 4. The system prompt
 
-Paste this into Open WebUI's system prompt for the model. It is deliberately short: a 3.8B-active
-router follows a page better than a chapter.
+Paste this into Open WebUI's system prompt for the model. It is kept short for a concrete reason:
+at `--max-model-len 16384` the tool definitions already take a third of the window, so every token
+spent on standing instructions is one unavailable for tool results and the answer. It is ~700 tokens
+against ~5,400 of definitions.
 
 ```text
 You are a detection engineering assistant. You have tools over a local corpus of 15,176
@@ -287,9 +299,11 @@ REPORT HONESTLY
 
 ## 5. Tool routing — the 29 exposed tools
 
-The reason routing needs help: the profile contains **six ways to retrieve a detection rule** and
-**seven MITRE lookups**. Near-synonymous names are exactly the shape a 3.8B-active router gets
-wrong, and the profile exists to keep that number at 29 rather than 134.
+The profile contains **six ways to retrieve a detection rule** and **seven MITRE lookups**, several
+of them near-synonymous. Spelling out which input selects which tool costs a few lines and removes
+the ambiguity for any reader, model or person — but this is guidance, not a measured constraint.
+The profile's size is justified by context (§3); this section is about making the remaining 29
+easy to choose between.
 
 Counts below sum to 29: composite 2, detection 7, MITRE 7, authoring 4, vulnerability/IOC 4, LOL 2,
 coverage 3.
@@ -394,8 +408,8 @@ existing coverage → author if there is a gap.
 
 ## 7. What this cannot enforce, and what would
 
-A system prompt **converts hard requirements into strong suggestions**. A 3.8B-active router will
-skip a prose instruction some fraction of the time, and no amount of rewriting fixes that. So the two
+A system prompt **converts hard requirements into strong suggestions**. Any model skips a prose
+instruction occasionally, and no amount of rewriting makes a sentence binding. So the two
 requirements that actually matter were moved out of the prompt and into code.
 
 **The LOLBAS gate is now enforced.** "Enumerate every abuse pattern before writing a condition" used
@@ -419,9 +433,12 @@ What remains genuinely unenforced:
   calls and skipping the gate that way. The routing rules in §4 and §5 point at the composites, but
   they are prompt-level, not structural.
 
-Also still unmeasured: **generation quality against the real model.** Nothing here has been evaluated
-end to end on Gemma 4. The tools are tested — 62 checks on the composites alone — but what Gemma does
-with them is not.
+Also still unmeasured: **anything about the model itself.** Nothing in this repository has been
+evaluated end to end on Gemma 4 — not generation quality, not tool-routing accuracy, not how often
+it skips a step. The tools are tested (62 checks on the composites alone); what Gemma does with them
+is not, and no claim here about its behaviour should be read as evidence. Where this runbook
+describes model behaviour, it is quoting Google's or vLLM's documentation; where it describes token
+counts and payload sizes, those are measured against this repository.
 
 ---
 
@@ -458,8 +475,10 @@ resolves identically to a clean one.
 
 ## Sources
 
-- [Gemma 4 model card](https://ai.google.dev/gemma/docs/core/model_card_4) — 25.2B total / 3.8B
-  active, 256K context, native `system` role, native structured tool use
+- [Gemma 4 model card](https://ai.google.dev/gemma/docs/core/model_card_4) — a **25.2B-parameter**
+  MoE, 3.8B of them active per token, 262K context, native `system` role, native structured tool
+  use. The active count describes inference cost, not capability; it says how fast the model runs,
+  not how well it reasons
 - [google/gemma-4-26B-A4B-it](https://huggingface.co/google/gemma-4-26B-A4B-it)
 - [Function calling with Gemma 4](https://ai.google.dev/gemma/docs/capabilities/text/function-calling-gemma4)
   — the `<|tool_call>call:name{key:<|"|>value<|"|>}<tool_call|>` serialisation, and tool declaration

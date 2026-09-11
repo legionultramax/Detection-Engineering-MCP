@@ -9,9 +9,9 @@
 // consumed 90% of the window before the model wrote a token.
 //
 // So the cap is configurable rather than baked in, and it applies to the
-// caller's explicit `limit` too. A small model asking for 200 results is
-// exactly the case that needs bounding, and it is also the case a per-tool
-// default cannot catch.
+// caller's explicit `limit` too. A request for 200 results is exactly the case
+// that needs bounding — it is also the case a per-tool default cannot catch,
+// since the tool's own default is not what was asked for.
 
 const DEFAULT_MAX_RESULTS = 50;
 const FLOOR = 1;

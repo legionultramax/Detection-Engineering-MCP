@@ -15,7 +15,7 @@
 **Target stack**
 | Layer | Component |
 |---|---|
-| Inference | `nvidia/Gemma-4-26B-A4B-NVFP4` (26B total / 4B active MoE, native function calling) |
+| Inference | `nvidia/Gemma-4-26B-A4B-NVFP4` (25.2B-parameter MoE, 3.8B active per token — an inference-cost figure, not a capability one; native function calling) |
 | Serving | vLLM OpenAI-compatible API @ `http://10.10.105.65:8000/v1`, launched with `--enable-auto-tool-choice --tool-call-parser gemma4 --reasoning-parser gemma4` |
 | Hardware | NVIDIA DGX Spark (GB10 Grace Blackwell, aarch64) |
 | Frontend | Open WebUI v0.11.3 |
@@ -26,7 +26,7 @@
 - **Phase 2** — approved query is dispatched to all client environments and executed.
 - **Phase 3** — results are aggregated into a report.
 
-**Core design principle.** Everything that currently depends on a frontier model's judgment (the `detect-engineer` 7-step pipeline, the LOLBAS hard gate, the 5–6 dimension validation rubric) must become **server-side code**, not prompt instructions. A 4B-active model will not reliably self-orchestrate a multi-step rubric no matter how well it is prompted. The server does the orchestration; the model only writes the query text.
+**Core design principle.** Everything that currently depends on a frontier model's judgment (the `detect-engineer` 7-step pipeline, the LOLBAS hard gate, the 5–6 dimension validation rubric) must become **server-side code**, not prompt instructions. No model self-orchestrates a multi-step rubric reliably from prose, because a sentence is not binding on anything — a skipped step leaves a rule that still looks finished. The server does the orchestration; the model writes the query text.
 
 **Compatibility constraint.** Claude Code (stdio) usage must keep working unchanged throughout. Every change below is additive and flag-gated.
 
@@ -138,7 +138,7 @@ Generate the OpenAPI spec from `toolRegistry` — the `ToolDefinition.inputSchem
 
 ### The problem
 
-All 122 tools are registered unconditionally (`registerAllTools()` in `src/tools/index.ts`) and `listTools()` returns `toolRegistry.toMcpTools()` — the whole surface. Handing a 4B-active model the full registry (detections + 59 threat-intel + coverage engine + knowledge graph + LOLFarm + reporting) degrades tool selection and burns context before the task starts.
+All 122 tools are registered unconditionally (`registerAllTools()` in `src/tools/index.ts`) and `listTools()` returns `toolRegistry.toMcpTools()` — the whole surface. The full registry (detections + 59 threat-intel + coverage engine + knowledge graph + LOLFarm + reporting) is ~20,400 tokens of definitions, which does not fit in the 16,384-token window vLLM's own Gemma 4 recipe recommends serving at — the task cannot start.
 
 Gemma-4-26B-A4B's native function-calling training makes it materially better at this than a dense 4B, but the right number of tools for "write one detection query" is still ~12, not 122.
 
@@ -170,7 +170,7 @@ toMcpTools(opts?: { profile?: string; compact?: boolean })
 
 `compact: true` emits `shortDescription` and strips schema `description` fields on obvious params — meaningful token savings across a manifest.
 
-**Schema hygiene for small models.** Audit every `phase1_authoring` tool for:
+**Schema hygiene.** Gemma 4's documentation advises one to two levels of nesting and simple enums. Audit every `phase1_authoring` tool for:
 - enum-constrained values wherever the domain is closed (`source`, `severity`, `platform`, `tactic`) — enums dramatically cut invalid-argument rates
 - ≤5 parameters per tool
 - no free-form nested objects
@@ -191,7 +191,7 @@ toMcpTools(opts?: { profile?: string; compact?: boolean })
 
 The detection-engineering logic that makes this repo trustworthy lives in Claude Code `SKILL.md` files under `~/.claude/skills/` — `detect-engineer`'s 7-step pipeline, the LOLBAS hard gate, `killchain-synth`, the validation rubric. **Open WebUI has no concept of these.** Point Gemma at the raw tools and you get data retrieval with none of the guardrails.
 
-Re-encoding the rubric as a long system prompt does not fix this: it converts hard requirements into suggestions that a 4B-active model will intermittently skip.
+Re-encoding the rubric as a long system prompt does not fix this: it converts hard requirements into suggestions, which are intermittently skipped by any model — and at 16K it also spends context that the tool results need.
 
 ### The fix — collapse each multi-step skill into one deterministic server-side tool
 

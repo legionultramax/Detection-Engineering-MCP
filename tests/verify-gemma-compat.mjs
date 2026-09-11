@@ -1,7 +1,11 @@
 #!/usr/bin/env node
 /**
- * Compatibility with a small local model — specifically Gemma 4 26B-A4B served
- * by vLLM behind Open WebUI.
+ * Compatibility with a locally served model — specifically Gemma 4 26B-A4B
+ * (25.2B parameters) served by vLLM behind Open WebUI.
+ *
+ * "Locally served" is the operative constraint, not model size. A single box
+ * runs at whatever --max-model-len its KV cache affords, which is far below the
+ * model's 262,144-token ceiling, and that is what these checks defend.
  *
  * This suite turns research findings into regressions. Each check corresponds
  * to a documented constraint of that deployment, so a change that quietly
@@ -11,8 +15,8 @@
  *      deeply nested schemas and complex enums; guidance is one to two levels.
  *      Every tool in this server must stay inside that.
  *   2. Payload size. vLLM's own Gemma 4 recipe recommends --max-model-len
- *      16384, not the model's 256K ceiling. The full 132-tool surface does not
- *      fit in it at all; the scoped profile must.
+ *      16384, not the model's 262K ceiling. The full tool surface does not fit
+ *      in it at all; the scoped profile must, with room left to work.
  *   3. Response size. Measured, list_by_mitre at the historical default of 50
  *      rows was ~4,500 tokens — 28% of a 16K window for one call. The
  *      HAWKEYE_MAX_RESULTS budget exists for that and must actually bind.
@@ -103,8 +107,9 @@ console.log('\n=== 1. Schema shape stays inside Gemma 4\'s ceiling ===');
   // generate_hunt_report takes `cards`, an array of objects with their own
   // properties; create_entity takes `properties`, a free-form object. Both are
   // excluded from phase1-authoring, so neither reaches the Gemma deployment as
-  // configured — but both would degrade a `research` or `full` profile behind a
-  // small model. The assertion is on the *set* rather than on zero, so a new
+  // configured — but both sit outside the nesting depth Gemma 4's own docs
+  // advise, so a `research` or `full` profile would hand the model schemas it is
+  // documented to handle poorly. The assertion is on the *set* rather than on zero, so a new
   // violation fails here while the known two do not produce a permanently red
   // suite that everyone learns to ignore.
   mod.toolRegistry.setProfile(null);

@@ -1,11 +1,10 @@
 // synthesize_killchain — the correlation scaffold, generated server-side.
 //
 // WAT-42 is the primary deliverable of a Standard or Deep hunt and the step
-// most often skipped, because inventing correlation structure from nothing is
-// exactly what a small model is worst at. It has to decide the phase ordering,
-// the pivot entity, the window, and the language's join idiom simultaneously,
-// and a mistake in any of them produces a query that runs and correlates the
-// wrong things.
+// most often skipped, because inventing correlation structure from nothing
+// means deciding the phase ordering, the pivot entity, the window and the
+// language's join idiom all at once — and a mistake in any of them produces a
+// query that runs, returns rows, and correlates the wrong things.
 //
 // Three of those four are deterministic. Phase ordering comes from the ATT&CK
 // tactic each technique belongs to. The pivot follows from the telemetry shape.

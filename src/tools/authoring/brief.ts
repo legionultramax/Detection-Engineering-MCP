@@ -5,10 +5,10 @@
 //
 // Enforcement. CLAUDE.md says "every binary-scoped rule must enumerate all
 // known abuse patterns before writing a condition". That is a sentence, and a
-// sentence is a suggestion: a 3.8B-active router skips it some fraction of the
-// time and nothing notices. A gate that cannot be skipped has to be something
-// the model *receives* rather than something it is told — so the abuse matrix
-// ships inside the brief. The model cannot write from this payload without
+// sentence is a suggestion — any model skips one occasionally, and when it
+// happens nothing notices, because the resulting rule looks finished. A gate
+// that cannot be skipped has to be something the model *receives* rather than
+// something it is told — so the abuse matrix ships inside the brief. The model cannot write from this payload without
 // having been handed the enumeration, and where the enumeration cannot be
 // obtained the brief returns BLOCKED and withholds the authoring material
 // instead of letting a partial rule look finished.

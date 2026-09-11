@@ -204,19 +204,32 @@ Restart Claude Desktop after configuration. On first launch the server indexes t
 
 ### Why `HAWKEYE_TOOL_PROFILE` matters
 
-The full surface is 134 tools — a 71 KB `tools/list` payload, on the order of 20,400 tokens. That
-fits comfortably in a large context window, so context is not the constraint — **discrimination is**.
-Eleven `lookup_*` LOLFarm tools, thirteen `otx_*`/`threatfox_*`/`bazaar_*` variants, and four
-plausible answers to "find me rules for credential dumping" degrade tool selection well before the
-window runs out.
+The full surface is 134 tools — a 71 KB `tools/list` payload, about **20,400 tokens**. On Claude
+Desktop's 200K window that is nothing. On a locally served model it is the whole problem.
 
-`phase1-authoring` is 29 tools and a 19.6 KB payload — a 73% reduction — chosen so that every fact a
-detection hypothesis rests on is retrievable and nothing else is. It deliberately excludes the
-network-bound threat-intel vendors, every knowledge-graph write, and the report generators.
+vLLM's own Gemma 4 recipe recommends serving at `--max-model-len 16384`. **20,400 tokens of tool
+definitions do not fit in a 16,384-token window** — not "crowd it", do not fit, before a single
+message is exchanged. The model's ceiling is 262,144 tokens and you can raise the served length, but
+KV cache is the scarce resource on one box, so 16K–32K is what these deployments actually run at.
 
-The reduction is in routing pressure, not context. Cutting 105 near-neighbour tool names is the
-point; the ~15,000 tokens saved is a side effect. `npm run verify:readonly` prints the measured
-payload size, so this figure is checkable rather than asserted.
+`phase1-authoring` is 29 tools and about **5,400 tokens**, which leaves a 16K window usable:
+
+| | Tokens | Share of 16K |
+|---|---|---|
+| Full surface, 134 tools | ~20,400 | **does not fit** |
+| `phase1-authoring`, 29 tools | ~5,400 | 33% |
+| …plus one complete authoring turn | ~6,900 | 42% |
+
+It is chosen so every fact a detection hypothesis rests on is retrievable and nothing else is:
+no network-bound threat-intel vendors, no knowledge-graph writes, no report generators.
+
+All three figures are measured, not asserted — `npm run verify:gemma` checks them, and
+`npm run verify:readonly` prints the payload size on every run.
+
+> An earlier version of this section claimed the constraint was tool *discrimination* rather than
+> context, reasoning from Gemma 4 26B-A4B's 3.8B active parameters. That number governs inference
+> speed, not judgement — it is a 25.2B-parameter model. Fewer near-duplicate tool names is plausibly
+> easier to route across, but nothing here measured it, so it is not the argument.
 
 ### Verify before wiring a client to it
 

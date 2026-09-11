@@ -11,10 +11,10 @@
  * catalog corroborates.
  *
  * What it does not measure, and cannot: whether a model given that brief writes
- * a good query. That needs the model, and substituting a larger one here would
- * produce a number that looks like a measurement and predicts nothing about a
- * 4B-active router. The honest split is that this file scores the inputs and a
- * separate harness, run against the deployed model, scores the outputs.
+ * a good query. That needs the model, and substituting a different one here
+ * would produce a number that looks like a measurement while saying nothing
+ * about the deployed one. The honest split is that this file scores the inputs
+ * and a separate harness, run against the deployed model, scores the outputs.
  *
  * The most actionable output is the tail: Sigma fields that appear in real
  * rules and have no mapping entry, ranked by how often they occur. That is the

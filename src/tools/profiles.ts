@@ -1,13 +1,29 @@
 // Tool profiles — scoping the exposed tool surface per deployment.
 //
-// The registry holds 132 tools. That is fine for Claude Desktop, which routes
-// well across a large surface, and it is the wrong shape for a small local
-// model: Gemma 4 26B-A4B is 26B total but only 4B active, and the failure mode
-// is discrimination, not context. The full `tools/list` payload is 66 KB — on
-// the order of 19,000 tokens, about 15% of a 128K window — so there is room. But
-// eleven `lookup_*` LOLFarm tools, thirteen `otx_*`/`threatfox_*`/`bazaar_*`
-// variants, and four different plausible answers to "find me rules for
-// credential dumping" degrade a 4B-active router long before it runs out of room.
+// The registry holds 134 tools. That is fine for Claude Desktop, which has a
+// 200K window and room to spare. It does not fit a locally served model, and
+// the reason is arithmetic rather than a judgement about the model.
+//
+// The full `tools/list` payload is 71 KB — about 20,400 tokens. vLLM's own
+// Gemma 4 recipe recommends serving at `--max-model-len 16384`, and 20,400
+// tokens of tool definitions **do not fit in a 16,384-token window at all**.
+// Not "crowd it": do not fit, before a single message is exchanged. Raising the
+// served length is possible — the model's ceiling is 262,144 — but KV cache is
+// the scarce resource on a single box, so 16K to 32K is what these deployments
+// actually run at.
+//
+// The `phase1-authoring` profile is ~5,400 tokens, which leaves a 16K window
+// usable: measured, the definitions plus one complete authoring turn come to
+// ~6,900 tokens, around 42%. That is the whole justification.
+//
+// Two things this comment used to claim and should not. It asserted the
+// constraint was tool *discrimination* rather than context, on the grounds that
+// Gemma 4 26B-A4B activates 3.8B parameters per token. That number governs
+// inference speed, not judgement — the model has 25.2B parameters and is far
+// more capable than its active count suggests, and nothing here was ever
+// measured against it. Fewer near-duplicate names is plausibly easier to route
+// across for any model, but it is an unverified nicety; the context arithmetic
+// above is the part that is checked, in tests/verify-gemma-compat.mjs.
 //
 // Profiles are opt-in. With HAWKEYE_TOOL_PROFILE unset the server exposes
 // everything, exactly as it always has.
@@ -102,7 +118,7 @@ export const PROFILES: Record<string, ToolProfile> = {
       // profile and belong at the front of it: build_authoring_brief replaces
       // six separate calls that measured ~6,000 tokens together, and it carries
       // the LOLBAS abuse matrix as data rather than leaving it to an
-      // instruction a small model can skip. synthesize_killchain computes the
+      // instruction that can be skipped. synthesize_killchain computes the
       // phase ordering, pivot and join idiom that WAT-42 previously asked the
       // model to invent.
       'build_authoring_brief',
