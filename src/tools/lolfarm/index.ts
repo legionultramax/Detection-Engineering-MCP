@@ -261,7 +261,7 @@ const lookupLofp = defineTool({
 // 5. WADComs search
 const lookupWadcom = defineTool({
   name: 'lookup_wadcom',
-  description: 'Search Windows/Active Directory offensive commands by keyword, tool name, or technique. Returns exact commands used by attackers for AD exploitation. Use for building detection conditions from real attack commands.',
+  description: 'Search Windows/Active Directory offensive commands by keyword, tool name, or technique. Returns the exact commands attackers run against AD, plus the protocol each one crosses (SMB, Kerberos, LDAP, NTLM, RPC, WMI) — which is what decides the log source a detection must read. Use for building detection conditions from real attack commands.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -274,6 +274,7 @@ const lookupWadcom = defineTool({
     const { query } = args as { query: string };
 
     const results = searchWADComs(query);
+    const inherited = results.some(w => w.mitre_source);
     return {
       query,
       count: results.length,
@@ -282,9 +283,24 @@ const lookupWadcom = defineTool({
         description: w.description,
         command: w.command,
         category: w.category,
-        tools_required: w.tools_required,
+        os: w.os,
+        services: w.services,
+        prerequisites: w.tools_required,
         mitre_techniques: w.mitre_techniques,
+        mitre_techniques_source: w.mitre_source,
       })),
+      // Said on every response that carries one, because the alternative is a
+      // reader treating a tool's whole ATT&CK profile as this command's mapping.
+      ...(inherited
+        ? {
+            note:
+              'WADComs publishes no ATT&CK mapping. Where mitre_techniques_source is present, the ' +
+              'technique IDs were derived by resolving the tool name against ATT&CK software ' +
+              'entries, so they describe the tool rather than this specific command — every ' +
+              'Impacket entry carries all of Impacket\'s techniques. Good for finding a command ' +
+              'from a technique; not evidence the command implements it.',
+          }
+        : {}),
       reference: 'https://wadcoms.github.io/',
     };
   },
@@ -588,8 +604,17 @@ const getLolfarmContext = defineTool({
     }
     if (context.wadcoms.length > 0) {
       response.wadcoms = context.wadcoms.slice(0, LIMIT).map(w => ({
-        name: w.name, command: w.command, tools: w.tools_required,
+        name: w.name, command: w.command, services: w.services, prerequisites: w.tools_required,
       }));
+      // These rows were reached by a technique ID that belongs to the tool, not
+      // necessarily to the command. Saying so here matters more than in
+      // lookup_wadcom, because here the technique is what selected them.
+      if (context.wadcoms.some(w => w.mitre_source)) {
+        response.wadcoms_note =
+          `Matched on the parent tool's ATT&CK profile rather than a per-command mapping — ` +
+          'WADComs publishes none. Expect entries for the same tool that do not perform this ' +
+          'technique; read the command text before using one.';
+      }
       if (context.wadcoms.length > LIMIT) response.wadcoms_truncated = `${context.wadcoms.length - LIMIT} more — use lookup_wadcom`;
     }
     if (context.lots_domains.length > 0) {

@@ -118,6 +118,24 @@ export function initLOLFarmSchema(): void {
     );
   `);
 
+  // CREATE TABLE IF NOT EXISTS does not add columns to a table that already
+  // exists, so a column introduced after the first release needs an explicit
+  // migration. ALTER TABLE throws when the column is already there, which is
+  // the normal case on every boot after the first — hence the swallow.
+  //
+  // `services` holds the WADComs "services" field: SMB, WMI, LDAP, WinRM and so
+  // on. It is kept rather than folded into `category` because it names the
+  // protocol a technique crosses, which is what decides the log source a
+  // detection has to read. Losing it would mean storing what an attacker does
+  // without storing where it would be seen.
+  for (const col of ['services TEXT', 'mitre_source TEXT']) {
+    try {
+      db.exec(`ALTER TABLE lolfarm_wadcoms ADD COLUMN ${col}`);
+    } catch {
+      // Column already present.
+    }
+  }
+
   console.error('[db] LOLFarm schema initialized');
 }
 
@@ -180,10 +198,31 @@ export interface WADComEntry {
   name: string;
   description?: string;
   command?: string;
+  /** Upstream `attack_types` — Exploitation, Enumeration, Privilege Escalation. */
   category?: string;
   os?: string;
+  /**
+   * Upstream `items`: what you must already hold for the command to work —
+   * Password, Username, Hash, Ticket. Prerequisites rather than tooling, which
+   * is what the column name suggests; the field was already called this.
+   */
   tools_required?: string[];
+  /** Protocols the command crosses: SMB, WMI, LDAP, WinRM, RPC, MSSQL. */
+  services?: string[];
+  /**
+   * ATT&CK techniques — but read `mitre_source` before using them.
+   *
+   * WADComs records no ATT&CK mapping of its own. These IDs are derived by
+   * resolving the tool name against ATT&CK's software entries, so they are the
+   * *tool's* documented technique profile rather than this specific command's:
+   * every Impacket entry inherits all eleven techniques ATT&CK attributes to
+   * Impacket, including ones that particular sub-command does not perform.
+   * Useful for finding the command from a technique; not evidence that the
+   * command implements it.
+   */
   mitre_techniques?: string[];
+  /** Where mitre_techniques came from, e.g. "S0357 Impacket (tool-level)". */
+  mitre_source?: string;
   resources?: string[];
 }
 
@@ -475,12 +514,14 @@ export function cacheWADCom(entry: WADComEntry): void {
   runBulkStatement(
     `INSERT OR REPLACE INTO lolfarm_wadcoms
      (name, description, command, category, os, tools_required,
-      mitre_techniques, resources, last_updated)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
+      services, mitre_techniques, mitre_source, resources, last_updated)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
     [entry.name, entry.description || null, entry.command || null,
      entry.category || null, entry.os || null,
      entry.tools_required ? JSON.stringify(entry.tools_required) : null,
+     entry.services ? JSON.stringify(entry.services) : null,
      entry.mitre_techniques ? JSON.stringify(entry.mitre_techniques) : null,
+     entry.mitre_source || null,
      entry.resources ? JSON.stringify(entry.resources) : null]
   );
 }
@@ -505,7 +546,9 @@ function parseWADComRow(row: Record<string, unknown>): WADComEntry {
     category: row.category as string | undefined,
     os: row.os as string | undefined,
     tools_required: row.tools_required ? JSON.parse(row.tools_required as string) : undefined,
+    services: row.services ? JSON.parse(row.services as string) : undefined,
     mitre_techniques: row.mitre_techniques ? JSON.parse(row.mitre_techniques as string) : undefined,
+    mitre_source: (row.mitre_source as string | null) ?? undefined,
     resources: row.resources ? JSON.parse(row.resources as string) : undefined,
   };
 }

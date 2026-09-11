@@ -13,7 +13,7 @@ The primary output is **kill-chain correlated queries** (KQL + SPL + Sigma), not
 ![Techniques](https://img.shields.io/badge/Technique_Coverage-596%2F835_(71.3%25)-brightgreen)
 ![ART](https://img.shields.io/badge/Atomic_Red_Team-not_indexed-lightgrey)
 ![TI Sources](https://img.shields.io/badge/TI_Sources-15+-purple)
-![LOLFarm](https://img.shields.io/badge/LOLFarm-7%2C519_entries-purple)
+![LOLFarm](https://img.shields.io/badge/LOLFarm-7%2C619_entries-purple)
 
 ---
 
@@ -24,7 +24,7 @@ The primary output is **kill-chain correlated queries** (KQL + SPL + Sigma), not
 | **Multi-source detection search** | Query 15,176 rules (KQL 5,509 · Sigma 4,030 · Elastic 2,218 · Splunk ESCU 2,185 · Sublime 1,234) plus 365 Splunk analytic stories, from one interface |
 | **MITRE ATT&CK enrichment** | 835 techniques, 187 groups, 787 software, 52 campaigns, 20,048 relationships — all local, all queryable |
 | **Atomic Red Team validation** | Indexes and cross-references Atomic Red Team tests against detection rules. **Deliberately not populated** — the sync clones a repository of working attack payloads, which raises EDR alerts. Enable it knowingly |
-| **LOLFarm intelligence** | Aggregates Living-Off-The-Land data from 7 sources: LoFP (5,614), LOLDrivers (697), HijackLibs (609), LOLRMM (319), LOLBAS (244), plus WADComs, LOTS and MalAPI — 7,519 entries. Five sources sync live; WADComs, LOTS and MalAPI publish nothing machine-readable and stay on seed data |
+| **LOLFarm intelligence** | Aggregates Living-Off-The-Land data from 7 sources: LoFP (5,614), LOLDrivers (697), HijackLibs (609), LOLRMM (319), LOLBAS (244), WADComs (110), LOTS and MalAPI — 7,619 entries. Six sources sync live; only LOTS and MalAPI publish nothing machine-readable and stay on seed data |
 | **LOLBAS hard gate** | Every binary-scoped rule must enumerate all known abuse patterns before a single condition is written |
 | **Threat intelligence** | 15+ sources: abuse.ch (URLhaus, ThreatFox, MalwareBazaar), AlienVault OTX, CISA/FBI/NSA/NCSC-UK/CERT-EU, Malpedia, NVD/EPSS, ANY.RUN |
 | **CVE-to-detection** | Input a CVE ID → get KQL, SPL, and Sigma rules with EPSS scores and KEV status |
@@ -56,7 +56,7 @@ flowchart TB
     LOCAL --> DB[("<b>SQLite + FTS5</b><br/>163 MB, self-contained")]
     NET -. "outbound HTTPS" .-> EXT["abuse.ch &nbsp;·&nbsp; AlienVault OTX<br/>NVD / EPSS &nbsp;·&nbsp; CISA KEV<br/>Malpedia &nbsp;·&nbsp; government CERTs"]
 
-    DB --- CONTENT["15,176 detection rules &nbsp;·&nbsp; 365 analytic stories<br/>835 techniques &nbsp;·&nbsp; 20,048 ATT&amp;CK relationships<br/>7,519 LOLFarm entries &nbsp;·&nbsp; 138 telemetry mappings"]
+    DB --- CONTENT["15,176 detection rules &nbsp;·&nbsp; 365 analytic stories<br/>835 techniques &nbsp;·&nbsp; 20,048 ATT&amp;CK relationships<br/>7,619 LOLFarm entries &nbsp;·&nbsp; 138 telemetry mappings"]
 
     classDef client fill:#e8f0fe,stroke:#4285f4,stroke-width:2px,color:#111
     classDef core fill:#fff4e5,stroke:#f59e0b,stroke-width:2px,color:#111
@@ -386,13 +386,13 @@ Aggregated Living-Off-The-Land intelligence from [lolol.farm](https://lolol.farm
 | **LOLRMM** | Legitimate RMM tools abused for C2/persistence (executables, network artifacts, registry) | **319** |
 | **LOLBAS** | Signed Windows binaries with documented abuse patterns | **244** |
 | **LoFP** | Known false positives mapped to ATT&CK techniques — what legitimately trips a rule | **5,614** |
+| **WADComs** | Offensive AD tools and commands, with the protocol each crosses (SMB, Kerberos, LDAP, NTLM, RPC) | **110** |
 | **LOTS** | Legitimate domains/services abused for exfil and C2 (pastebin, Discord, ngrok) | 14 · seed only |
 | **MalAPI** | Windows API calls common in malware (injection, credential access, MBR wipe) | 12 · seed only |
-| **WADComs** | Offensive AD tools and commands (Impacket, BloodHound, Rubeus, CrackMapExec) | 10 · seed only |
 
 Populate or refresh with `sync_lolfarm`.
 
-**Five of the eight sources sync live.** LoFP was one of four whose URL 404'd — it pointed at a
+**Six of the eight sources sync live.** LoFP was one of four whose URL 404'd — it pointed at a
 SigmaHQ path that does not exist. The real upstream is a Hugo site that publishes its whole search
 index as JSON in one request, which took LoFP from 19 seed rows to **5,614 across 375 techniques**.
 
@@ -401,7 +401,6 @@ reason rather than a retryable failure:
 
 | Source | Why it cannot sync |
 |---|---|
-| **WADComs** | No JSON API — one Markdown file per tool with YAML front matter (144 files, ~145 requests). Carries no ATT&CK IDs, so synced rows would be invisible to `get_lolfarm_context`, which selects on `mitre_techniques` |
 | **LOTS** | No public data repository. `lots-project.com` serves HTML and answers unknown paths with **200**, not 404 |
 | **MalAPI** | No official repository. `malapi.io` also returns 200 for unknown paths; every existing consumer keeps a private scrape of unknown vintage |
 

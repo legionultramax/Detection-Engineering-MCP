@@ -279,6 +279,60 @@ console.log('\n=== 9. Hostile input does not crash either tool ===');
     JSON.stringify(after.obj).includes('15'), JSON.stringify(after.obj).slice(0, 80));
 }
 
+console.log('\n=== 10. WADComs: derived ATT&CK mappings declare their provenance ===');
+{
+  // WADComs publishes no ATT&CK mapping. The technique IDs stored against it
+  // are derived by resolving the tool name against ATT&CK software entries, so
+  // they belong to the *tool* rather than the individual command — every
+  // Impacket entry carries all of Impacket's techniques, including ones that
+  // sub-command does not perform. That is acceptable as a way to find a command
+  // from a technique, and misleading if presented as the command's own mapping.
+  // So the rule under test is: techniques and provenance travel together.
+  const { runQuery } = await import(url('db', 'connection.js'));
+
+  // Seed rows carry hand-written, command-specific mappings and legitimately
+  // have no derived provenance, and nothing in the schema distinguishes seed
+  // from synced except mitre_source itself — so "every mapped row has
+  // provenance" is not a testable claim, it is circular. What is testable is
+  // that the unprovenanced remainder stays small: the seed set is 10 rows, so
+  // a sync that silently stopped recording provenance would push this up.
+  const synced = runQuery(
+    "SELECT COUNT(*) c FROM lolfarm_wadcoms WHERE mitre_source IS NOT NULL"
+  )[0].c;
+  const unprovenanced = runQuery(
+    `SELECT COUNT(*) c FROM lolfarm_wadcoms
+     WHERE mitre_source IS NULL AND mitre_techniques IS NOT NULL AND mitre_techniques != '[]'`
+  )[0].c;
+
+  if (synced === 0) {
+    console.log('        WADComs not synced in this database — provenance checks skipped');
+    check('WADComs rows exist at all', runQuery('SELECT COUNT(*) c FROM lolfarm_wadcoms')[0].c > 0);
+  } else {
+    check('synced rows carry a provenance string', synced > 0, `${synced} rows`);
+    check('provenance names the ATT&CK software id and says it is tool-level',
+      runQuery(
+        "SELECT COUNT(*) c FROM lolfarm_wadcoms WHERE mitre_source IS NOT NULL " +
+        "AND mitre_source LIKE 'S%' AND mitre_source LIKE '%tool-level%'"
+      )[0].c === synced);
+    check('every derived technique id is a real ATT&CK technique',
+      runQuery(
+        `SELECT COUNT(*) c FROM lolfarm_wadcoms w
+         WHERE w.mitre_source IS NOT NULL AND EXISTS (
+           SELECT 1 FROM json_each(w.mitre_techniques) j
+           WHERE NOT EXISTS (SELECT 1 FROM mitre_techniques_full t WHERE t.id = j.value)
+         )`
+      )[0].c === 0);
+    check('lookup_wadcom states the mapping is tool-level',
+      /tool name against ATT&CK software/i.test(
+        JSON.stringify(await mod.toolRegistry.execute('lookup_wadcom', { query: 'impacket' }))
+      ));
+    check('the protocol each command crosses is captured',
+      runQuery("SELECT COUNT(*) c FROM lolfarm_wadcoms WHERE services IS NOT NULL AND services != '[]'")[0].c > 20);
+  }
+  check('unprovenanced mappings stay within the hand-written seed set',
+    unprovenanced <= 10, `${unprovenanced} rows — seed is 10`);
+}
+
 console.log('\n' + '='.repeat(52));
 console.log(`  ${pass} passed, ${fail} failed`);
 console.log('='.repeat(52));

@@ -127,23 +127,27 @@ nothing.
 
 Three datasets are separate from the rule corpus. Each is a deliberate decision.
 
-**LOLFarm — 7,519 entries, 8 metadata endpoints.** Driver hashes, DLL hijack paths, RMM tool names,
+**LOLFarm — 7,619 entries, 8 metadata endpoints.** Driver hashes, DLL hijack paths, RMM tool names,
 abused domains. Metadata about abusable software, not the software.
 
 ```bash
 # writable, then call sync_lolfarm through any MCP client
 ```
 
-**Five of the eight sources have a live feed** — LOLDrivers, HijackLibs, LOLRMM, LoFP and LOLBAS.
+**Six of the eight sources have a live feed** — LOLDrivers, HijackLibs, LOLRMM, LoFP, LOLBAS and WADComs.
 `sync_lolfarm` reports per-source status.
 
-The other three publish nothing machine-readable and stay on seed data. They return
+**WADComs** is a Jekyll site with no JSON API, so its sync lists `_wadcoms/` and fetches one
+Markdown file per entry — 104 files, ~105 requests, about 7 seconds. It records no ATT&CK mapping
+of its own; technique IDs are derived by resolving the tool name against ATT&CK software entries, so
+they describe the *tool* rather than the specific command and every response says so.
+
+The remaining two publish nothing machine-readable and stay on seed data. They return
 `status: "no_upstream"` with a `reason` saying what was checked; that is permanent, so retrying will
 not help:
 
 | Source | Why |
 |---|---|
-| **WADComs** | No JSON API. One Markdown file per tool with YAML front matter (144 files). Carries no ATT&CK technique IDs, so synced rows could not be reached by `get_lolfarm_context`, which selects on `mitre_techniques` |
 | **LOTS** | No public data repository. `lots-project.com` serves HTML and returns **200 for unknown paths** |
 | **MalAPI** | No official repository. `malapi.io` also returns 200 for unknown paths; every existing consumer keeps a private scrape |
 
@@ -222,17 +226,18 @@ caller spend a turn on one that cannot work.
 ## Step 7 — Verify
 
 ```bash
-npm run verify:readonly   # 53  read-only really is read-only
-npm run verify:search     # 36  FTS5, ranking, query-syntax safety
-npm run verify:queries    # 95  language specs and the validation gate
-npm run verify:aql        # 74  QRadar AQL spec, validation, pipeline constraints
-npm run verify:gemma      # 32  small-model schema shape, context budget, delimiter repair
-npm run verify:coverage   # 16  translation brief coverage
-npm run verify:http       # 26  the HTTP transport, on an ephemeral port
-npm test                  # 138 full contract suite — needs a writable database
+npm run verify:readonly   #  62  read-only really is read-only
+npm run verify:search     #  36  FTS5, ranking, query-syntax safety
+npm run verify:queries    #  95  language specs and the validation gate
+npm run verify:aql        #  74  QRadar AQL spec, validation, pipeline constraints
+npm run verify:authoring  #  62  the composite tools and the LOLBAS gate
+npm run verify:gemma      #  35  schema shape, context budget, delimiter repair
+npm run verify:coverage   #  16  translation brief coverage
+npm run verify:http       #  26  the HTTP transport, on an ephemeral port
+npm test                  # 138  full contract suite — needs a writable database
 ```
 
-All local, all offline. Run `npm test` against a copy, since it writes.
+All local, all offline — 544 checks. Run `npm test` against a copy, since it writes.
 
 A healthy stdio start looks like:
 
@@ -264,11 +269,26 @@ A healthy stdio start looks like:
 
 ## Moving an existing installation
 
-1. `npm run fts:status` on the old machine — confirm the database is current.
-2. Copy `detections.db` across. Nothing else in `data/` is needed.
-3. Steps 1, 2, 6, 7 on the new machine. Skip 3, 4 and 5 entirely.
-4. Re-run `npm run fts:status` on the new host to confirm the index survived the copy.
+1. Stop the server on the old machine.
+2. **`npm run db:checkpoint`** — folds the write-ahead log into the database file. Do not skip this.
+3. `npm run fts:status` — confirm the database is current.
+4. Copy `detections.db` across. Once step 2 has run, nothing else in `data/` is needed.
+5. Steps 1, 2, 6, 7 on the new machine. Skip 3, 4 and 5 entirely.
+6. Re-run `npm run fts:status` on the new host to confirm the index survived the copy.
 
-The database is self-contained: rules, MITRE, LOLFarm, Sublime, the coverage mappings and the
-full-text index are all inside that one file. The rule repositories are only needed to build or
-refresh it, never to run.
+> **Why step 2 is not optional.** SQLite runs in WAL mode here, so recent writes live in
+> `detections.db-wal` until a checkpoint moves them into `detections.db`. Any reader that opens the
+> database sees both files and reports the full count — so the source machine looks correct — but
+> `cp detections.db` copies only the main file. **The copy silently lacks whatever the WAL still
+> held.**
+>
+> This is not hypothetical: a copy taken with 4 MB outstanding in the WAL was missing 68 LoFP rows,
+> and the shortfall was invisible until the copy was queried. `db:checkpoint` reports how many
+> frames it moved and fails loudly if another process is holding the database open.
+>
+> If you cannot stop the server, copy all three files — `detections.db`, `-wal` and `-shm` — and
+> keep them together.
+
+After the checkpoint the database is self-contained: rules, MITRE, LOLFarm, Sublime, the coverage
+mappings and the full-text index are all inside that one file. The rule repositories are only needed
+to build or refresh it, never to run.

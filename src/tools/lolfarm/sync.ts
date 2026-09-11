@@ -9,7 +9,8 @@ import {
   updateSyncStatus,
 } from '../../db/lolfarm.js';
 import { cacheLOLBAS, LOLBASEntry } from '../../db/threat-intel.js';
-import { saveDb } from '../../db/connection.js';
+import { saveDb, runQuery } from '../../db/connection.js';
+import { parse as parseYaml } from 'yaml';
 
 // ---------------------------------------------------------------------------
 // Upstream endpoints
@@ -32,6 +33,10 @@ const SOURCES = {
   // site is actually served from the owner's user pages.
   lofp:       'https://brokensound77.github.io/LoFP/index.json',      // 200, 3,360 entries
   lolbas:     'https://lolbas-project.github.io/api/lolbas.json',     // 200, 244 entries
+  // WADComs publishes no JSON. It is a Jekyll site whose content is one
+  // Markdown file per technique with YAML front matter, so the "endpoint" is a
+  // directory listing plus one raw fetch per entry — see fetchWADComs below.
+  wadcoms:    'https://api.github.com/repos/WADComs/WADComs.github.io/contents/_wadcoms',
 } as const;
 
 /**
@@ -49,13 +54,6 @@ const SOURCES = {
  * path. `fetchJson` now rejects an HTML body explicitly for that reason.
  */
 const NO_UPSTREAM: Record<string, string> = {
-  wadcoms:
-    'No JSON API. Data is one Markdown file per tool with YAML front matter in ' +
-    'WADComs/WADComs.github.io:_wadcoms/ (144 files, ~145 requests per sync). ' +
-    'Front matter carries description, command, items, services, OS, attack_types, ' +
-    'references — but no ATT&CK technique IDs, so synced rows could not be reached ' +
-    'by get_lolfarm_context, which selects on mitre_techniques. Implementable; ' +
-    'deliberately not implemented.',
   lots:
     'No public data repository or API. lots-project.com serves HTML and returns ' +
     '200 for unknown paths; site URLs are hex-encoded (/site/2a2e6769746875622e696f). ' +
@@ -286,18 +284,151 @@ function mapLoFP(raw: Record<string, unknown>): LoFPEntry | null {
   return { id: raw.id as string, technique_id: tid, description: desc };
 }
 
+// --- WADComs ----------------------------------------------------------------
+//
+// A Jekyll site, not an API. Each technique is a Markdown file under
+// _wadcoms/ whose YAML front matter carries description, command, items,
+// services, OS, attack_types and references. So the sync is a directory listing
+// (one GitHub API call) followed by one raw fetch per file.
+//
+// The interesting problem is ATT&CK mapping: WADComs records none. Writing
+// technique IDs from recall would be fabrication — a mapping that looks
+// authoritative and is unfalsifiable — so instead the tool name is resolved
+// against ATT&CK's own software entries and the technique IDs come from the
+// `uses` relationships MITRE already publishes. Mimikatz resolves to S0002 and
+// its 17 techniques; Evil-WinRM resolves to nothing and is stored unmapped,
+// reachable through lookup_wadcom and search_lolfarm but not through
+// get_lolfarm_context, which selects on mitre_techniques. That asymmetry is
+// reported rather than papered over.
+
+/** Concurrency cap for the per-file fetches. Polite, and fast enough weekly. */
+const WADCOM_CONCURRENCY = 8;
+
+async function fetchText(url: string): Promise<string> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  try {
+    const res = await fetch(url, {
+      signal: controller.signal,
+      headers: { 'User-Agent': USER_AGENT, Accept: 'text/plain' },
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
+    return await res.text();
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** YAML front matter between the leading `---` fences. */
+function frontMatter(md: string): Record<string, unknown> | null {
+  const m = md.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+  if (!m) return null;
+  try {
+    const parsed = parseYaml(m[1]);
+    return parsed && typeof parsed === 'object' ? parsed as Record<string, unknown> : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * ATT&CK technique IDs for a WADComs entry, derived from MITRE's own data.
+ *
+ * File names carry a qualifier — `Evil-WinRM-PTH`, `Enum4Linux-Creds` — so the
+ * trailing segments are stripped one at a time looking for a software entry.
+ * Candidates shorter than five characters are refused: stripping
+ * `Evil-WinRM-PTH` down to `Evil` would eventually match something unrelated,
+ * and a wrong mapping here is worse than none, because it would place a
+ * technique's abuse guidance under a technique that does not use it.
+ */
+function techniquesForToolName(rawName: string): { ids: string[]; source?: string } {
+  const parts = rawName.split('-');
+  for (let take = parts.length; take >= 1; take--) {
+    const candidate = parts.slice(0, take).join('-');
+    if (candidate.length < 5) break;
+    const sw = runQuery<{ id: string; stix_id: string; name: string }>(
+      `SELECT id, stix_id, name FROM mitre_tools WHERE LOWER(name) = LOWER(?)
+       UNION
+       SELECT id, stix_id, name FROM mitre_malware WHERE LOWER(name) = LOWER(?)
+       LIMIT 1`,
+      [candidate, candidate]
+    );
+    if (sw.length === 0) continue;
+    const ids = runQuery<{ id: string }>(
+      `SELECT DISTINCT t.id FROM mitre_relationships r
+       JOIN mitre_techniques_full t ON r.target_ref = t.stix_id
+       WHERE r.source_ref = ? AND r.relationship_type = 'uses'
+       ORDER BY t.id`,
+      [sw[0].stix_id]
+    ).map(r => r.id);
+    if (ids.length === 0) continue;
+    // The provenance is the honest part. Without it, "Impacket-GetADUsers has
+    // T1003.006" reads as a claim about that command; with it, the claim is the
+    // true one — ATT&CK attributes that technique to Impacket the tool.
+    return {
+      ids,
+      source: `${sw[0].id} ${sw[0].name} — tool-level ATT&CK profile, not specific to this command`,
+    };
+  }
+  return { ids: [] };
+}
+
+/** One pass over the collection, bounded concurrency, failures skipped not fatal. */
+async function fetchWADComs(listingUrl: string): Promise<Array<Record<string, unknown>>> {
+  const listing = await fetchJson<Array<{ name: string; download_url: string | null; type: string }>>(
+    listingUrl
+  );
+  if (!Array.isArray(listing)) return [];
+
+  const files = listing.filter(
+    f => f.type === 'file' && f.name.endsWith('.md') && typeof f.download_url === 'string'
+  );
+
+  const out: Array<Record<string, unknown>> = [];
+  let cursor = 0;
+
+  async function worker(): Promise<void> {
+    for (;;) {
+      const i = cursor++;
+      if (i >= files.length) return;
+      const f = files[i];
+      try {
+        const fm = frontMatter(await fetchText(f.download_url as string));
+        if (!fm) continue;
+        out.push({ ...fm, __name: f.name.replace(/\.md$/, '') });
+      } catch {
+        // One unreachable file must not lose the other 143.
+      }
+    }
+  }
+
+  await Promise.all(
+    Array.from({ length: Math.min(WADCOM_CONCURRENCY, files.length) }, worker)
+  );
+  return out;
+}
+
 function mapWADCom(raw: Record<string, unknown>): WADComEntry | null {
-  const name = (raw.name as string) || (raw.title as string);
+  const name = (raw.__name as string) || (raw.name as string) || (raw.title as string);
   if (!name) return null;
+
+  const { ids, source } = techniquesForToolName(name);
+
   return {
     name,
-    description: raw.description as string,
-    command: (raw.command as string) || (raw.cmd as string),
-    category: raw.category as string,
-    os: (raw.os as string) || 'windows',
-    tools_required: (raw.tools as string[]) || [],
-    mitre_techniques: (raw.mitre as string[]) || [],
-    resources: (raw.references as string[]) || [],
+    // Front matter descriptions carry a "Command Reference" block with example
+    // IPs and passwords. Kept — it is how the command is meant to be read — but
+    // capped, because 144 of them at full length is a lot of corpus for little
+    // added meaning.
+    description: typeof raw.description === 'string' ? raw.description.trim().slice(0, 900) : undefined,
+    command: typeof raw.command === 'string' ? raw.command.trim() : undefined,
+    category: toStringArray(raw.attack_types ?? raw.category).join(', ') || undefined,
+    os: toStringArray(raw.OS ?? raw.os).join(', ') || undefined,
+    tools_required: toStringArray(raw.items),
+    services: toStringArray(raw.services),
+    mitre_techniques: ids,
+    mitre_source: source,
+    resources: toStringArray(raw.references).slice(0, 5),
   };
 }
 
@@ -367,6 +498,13 @@ interface Fetcher {
    * upstream a one-line change instead of a rediscovery.
    */
   url: string | null;
+  /**
+   * Custom retrieval, for a source whose records are not one JSON document.
+   * When present it replaces the single `fetchJson(url)` call and returns the
+   * records directly; `url` is still carried so the result can report where the
+   * sync started.
+   */
+  fetchAll?: (url: string) => Promise<Array<Record<string, unknown>>>;
   parse: (data: unknown) => Array<Record<string, unknown>>;
   map: (raw: Record<string, unknown>) => unknown;
   cache: (entry: unknown) => void;
@@ -398,7 +536,11 @@ const FETCHERS: Record<SourceName, Fetcher> = {
     cache: (e) => e && cacheLoFP(e as LoFPEntry),
   },
   wadcoms: {
-    url: null,
+    url: SOURCES.wadcoms,
+    // The only source whose records are not one JSON document. fetchAll does
+    // the directory listing and the per-file fetches; parse then just passes
+    // the collected front matter through.
+    fetchAll: fetchWADComs,
     parse: (data) => Array.isArray(data) ? data as Array<Record<string, unknown>> : [],
     map: (r) => mapWADCom(r),
     cache: (e) => e && cacheWADCom(e as WADComEntry),
@@ -467,8 +609,9 @@ async function syncOne(source: SourceName): Promise<SyncSourceResult> {
   }
 
   try {
-    const raw = await fetchJson(fetcher.url);
-    const records = fetcher.parse(raw);
+    const records = fetcher.fetchAll
+      ? await fetcher.fetchAll(fetcher.url)
+      : fetcher.parse(await fetchJson(fetcher.url));
     if (records.length === 0) {
       return { source, url: fetcher.url, status: 'empty', fetched: 0, cached: 0, duration_ms: Date.now() - t0 };
     }
