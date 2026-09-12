@@ -466,6 +466,10 @@ the authoring sequence. Nothing server-side can. That is what the table is for.
 
 ### Then: the seven questions, against the real stack
 
+For a fuller pass, **[GEMMA-EVAL-PROMPTS.md](GEMMA-EVAL-PROMPTS.md)** carries 20 scored prompts from
+easy to adversarial, each with a pass criterion and what a specific failure means. The seven below
+are the fast triage; that file is the acceptance test.
+
 Run these in order. Each has a wrong answer that tells you which layer is broken.
 
 | # | Ask the model | Confirms | Wrong answer means |

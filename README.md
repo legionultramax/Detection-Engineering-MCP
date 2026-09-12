@@ -94,7 +94,8 @@ repositories are only needed to build or refresh it, never to run.
 > **[docs/GEMMA-RUNBOOK.md](docs/GEMMA-RUNBOOK.md)**. `CLAUDE.md` does not apply there — it is a
 > Claude Code convention file, it names 50 tools a scoped deployment does not expose, and a third of
 > it describes a skill system and a browser that Open WebUI does not have. The runbook carries the
-> system prompt, the tool-routing rules and the wiring instead.
+> system prompt, the tool-routing rules and the wiring instead. **[docs/GEMMA-EVAL-PROMPTS.md](docs/GEMMA-EVAL-PROMPTS.md)**
+> is the 20-prompt acceptance test for that deployment.
 
 ### Prerequisites
 - Node.js 18+
