@@ -237,7 +237,18 @@ npm run verify:http       #  26  the HTTP transport, on an ephemeral port
 npm test                  # 138  full contract suite — needs a writable database
 ```
 
-All local, all offline — 544 checks. Run `npm test` against a copy, since it writes.
+All local, all offline — 550 checks. Run `npm test` against a copy, since it writes.
+
+Then prove the deployment shape end to end, which the suites above do not cover:
+
+```bash
+npm run preflight
+```
+
+It starts the server with the documented settings, speaks MCP over HTTP as a client would, and runs
+23 checks across the transport, auth, sessions, the scoped profile, the corpus, the authoring gate
+and the AQL constraints. Point it at an already-running server with
+`npm run preflight -- --url http://HOST:PORT/mcp --token XYZ`.
 
 A healthy stdio start looks like:
 

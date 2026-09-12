@@ -444,12 +444,34 @@ counts and payload sizes, those are measured against this repository.
 
 ## 8. Verify before trusting it
 
+### First: prove the server, so a later failure is unambiguous
+
+```bash
+npm run preflight                                   # on the server's own machine
+npm run preflight -- --url http://HOST:PORT/mcp --token XYZ   # against a deployed one
+```
+
+This starts the server with the documented deployment settings, speaks MCP over HTTP the way Open
+WebUI will, and drives the same seven scenarios below as **direct tool calls** — no model involved.
+23 checks: transport, auth, session handling, the 29-tool profile, the corpus, FTS5, the LOLBAS
+gate, the AQL constraints, and read-only enforcement.
+
+The point is isolation. Asking the model a question exercises the model, the tool parser, the
+transport, the profile and the data all at once, so a bad answer says nothing about which of them
+broke. **If a step below fails on the real stack and its counterpart passes in preflight, the fault
+is above the server** — the parser, the system prompt, or the model.
+
+Preflight cannot tell you whether Gemma picks the right tool, fills arguments correctly, or follows
+the authoring sequence. Nothing server-side can. That is what the table is for.
+
+### Then: the seven questions, against the real stack
+
 Run these in order. Each has a wrong answer that tells you which layer is broken.
 
 | # | Ask the model | Confirms | Wrong answer means |
 |---|---|---|---|
 | 1 | "Call get_stats." | Tool calling works at all | Model narrates a call → vLLM tool parser mismatch |
-| 2 | "How many tools do you have?" | Profile is applied | Not 27 → `HAWKEYE_TOOL_PROFILE` unset |
+| 2 | "How many tools do you have?" | Profile is applied | Not 29 → `HAWKEYE_TOOL_PROFILE` unset |
 | 3 | "Find detections for T1059.001." | Routing on a technique ID | Used `search_detections` → routing rules not in the system prompt |
 | 4 | "Search for certutil download." | Corpus + FTS5 | Zero results → database missing or index stale (`npm run fts:status`) |
 | 5 | "Write a KQL rule for T1003.001." | The authoring loop | Skipped `validate_query` → the sequence is not being followed |
@@ -457,13 +479,14 @@ Run these in order. Each has a wrong answer that tells you which layer is broken
 | 7 | "Look up CVE-2021-44228." | Network-bound tools | Errors → expected on an isolated host; the model must *say* the check did not run |
 | 8 | Watch the server's stderr during 3–5 | The tool parser | A `Stripped Gemma 4 tool-call delimiters` line → your vLLM parser is leaking (vllm#39468). Calls still work; fix the parser |
 
-Server-side, all eight suites should pass first:
+Server-side, all eight suites should pass first — `npm run preflight` assumes they do:
 
 ```bash
 npm run lint && npm run tools:check
 npm run verify:readonly && npm run verify:queries && npm run verify:aql
 npm run verify:search && npm run verify:http && npm run verify:coverage
-npm run verify:gemma      # 32 checks — schema shape, context budget, delimiter repair
+npm run verify:gemma      # 35 checks — schema shape, context budget, delimiter repair
+npm run verify:authoring  # 68 checks — the composite tools and the LOLBAS gate
 ```
 
 `verify:gemma` is the one that keeps this document true. It asserts that the profile's schemas stay

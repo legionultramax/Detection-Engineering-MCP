@@ -32,6 +32,7 @@
     "verify:authoring": "npm run build && node tests/verify-authoring-tools.mjs",
     "verify:gemma": "npm run build && node tests/verify-gemma-compat.mjs",
     "db:checkpoint": "node scripts/checkpoint-db.mjs",
+    "preflight": "npm run build && node scripts/preflight.mjs",
     "fts:build": "npm run build && node scripts/build-fts.mjs",
     "fts:status": "npm run build && node scripts/build-fts.mjs --status",
     "catalog:build": "npm run build && node scripts/build-field-catalog.mjs",
